@@ -44,7 +44,7 @@ const items = [
   { href: "/plano", key: "plano", label: "PLANO", icon: "plano" },
 ];
 
-export default function BottomNav({ authEnabled }: { authEnabled?: boolean }) {
+export default function BottomNav() {
   const path = usePathname();
   if (path.startsWith("/login")) return null;
 

@@ -1,38 +1,14 @@
 import "server-only";
-import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { createClient } from "./supabase-server";
 
-// Acesso ao Supabase pela API (PostgREST) sobre HTTPS — sem conexão TCP direta.
-// Use a service_role key (server-only): todo acesso é feito no servidor.
-function makeClient(): SupabaseClient {
-  const url = process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key =
-    process.env.SUPABASE_SERVICE_ROLE_KEY ??
-    process.env.SUPABASE_KEY ??
-    process.env.SUPABASE_SERVICE_KEY;
-  if (!url || !key) {
-    throw new Error(
-      "Supabase não configurado: defina SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY."
-    );
-  }
-  return createClient(url, key, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
-}
-
-// Cliente lazy + singleton (importar o módulo nunca conecta nem lança).
-const globalForDb = globalThis as unknown as { __supa?: SupabaseClient };
-let real: SupabaseClient | null = globalForDb.__supa ?? null;
-export function supa(): SupabaseClient {
-  if (!real) {
-    real = makeClient();
-    globalForDb.__supa = real;
-  }
-  return real;
-}
+// Cliente Supabase por-request (RLS por auth.uid()). Cada acesso pega a sessão
+// dos cookies; o filtro por usuário é garantido pelo RLS no banco.
+export const db = createClient;
 
 // ---------- Settings ----------
 export async function getSetting(key: string): Promise<string | null> {
-  const { data, error } = await supa()
+  const sb = await db();
+  const { data, error } = await sb
     .from("settings")
     .select("value")
     .eq("key", key)
@@ -42,9 +18,11 @@ export async function getSetting(key: string): Promise<string | null> {
 }
 
 export async function setSetting(key: string, value: string): Promise<void> {
-  const { error } = await supa()
+  const sb = await db();
+  // user_id é preenchido pelo default auth.uid(); conflito é por (user_id, key)
+  const { error } = await sb
     .from("settings")
-    .upsert({ key, value }, { onConflict: "key" });
+    .upsert({ key, value }, { onConflict: "user_id,key" });
   if (error) throw error;
 }
 
@@ -72,14 +50,19 @@ export interface EntryInsert {
   done: number;
   notes: string | null;
   position: number;
+  // FKs do programa (003/004). NULLABLE: histórico/semente continuam válidos.
+  program_day_id?: string | null;
+  day_exercise_id?: string | null;
 }
 
-/** Insere a sessão e suas entradas. Se as entradas falharem, remove a sessão. */
+/** Insere a sessão e suas entradas. Se as entradas falharem, remove a sessão.
+ *  user_id é preenchido automaticamente pelo default auth.uid() no banco. */
 export async function insertWorkout(
   s: SessionInsert,
   entries: EntryInsert[]
 ): Promise<number> {
-  const { data, error } = await supa()
+  const sb = await db();
+  const { data, error } = await sb
     .from("sessions")
     .insert(s)
     .select("id")
@@ -89,10 +72,24 @@ export async function insertWorkout(
 
   const valid = entries.filter((e) => e.exercise && e.exercise.trim());
   if (valid.length) {
-    const rows = valid.map((e) => ({ ...e, session_id: id }));
-    const { error: e2 } = await supa().from("entries").insert(rows);
+    // Só inclui as colunas de FK do programa quando há vínculo real. Assim, se a
+    // migração 003 ainda não estiver aplicada (colunas inexistentes), o insert da
+    // semente não tenta escrever nelas e não quebra. (R8: FKs nullable.)
+    const hasProgramLink = valid.some((e) => e.program_day_id || e.day_exercise_id);
+    const rows = valid.map((e) => {
+      const base: Record<string, unknown> = { ...e, session_id: id };
+      if (hasProgramLink) {
+        base.program_day_id = e.program_day_id ?? null;
+        base.day_exercise_id = e.day_exercise_id ?? null;
+      } else {
+        delete base.program_day_id;
+        delete base.day_exercise_id;
+      }
+      return base;
+    });
+    const { error: e2 } = await sb.from("entries").insert(rows);
     if (e2) {
-      await supa().from("sessions").delete().eq("id", id);
+      await sb.from("sessions").delete().eq("id", id);
       throw e2;
     }
   }
@@ -100,8 +97,9 @@ export async function insertWorkout(
 }
 
 export async function removeSession(id: number): Promise<void> {
+  const sb = await db();
   // entries são apagadas em cascata pela FK (ON DELETE CASCADE)
-  const { error } = await supa().from("sessions").delete().eq("id", id);
+  const { error } = await sb.from("sessions").delete().eq("id", id);
   if (error) throw error;
 }
 

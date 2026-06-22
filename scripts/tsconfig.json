@@ -1,0 +1,18 @@
+{
+  "//": "Config dos runners de seed/verify (005). Eles rodam via type-stripping nativo do Node (v23+); este tsconfig serve para checagem de tipos isolada dos scripts e dos seeds, sem o ambiente DOM do app.",
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "resolveJsonModule": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "noEmit": true,
+    "types": ["node"]
+  },
+  "include": ["./*.ts", "../supabase/seeds/*.ts", "../src/lib/*.ts"],
+  "exclude": ["../node_modules"]
+}

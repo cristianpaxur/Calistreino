@@ -1,5 +1,5 @@
 import {
-  supa,
+  db,
   matchFront,
   matchPlanche,
   type EntryRow,
@@ -8,7 +8,8 @@ import {
 
 // Mapa session_id -> date (evita depender de "embeds"/FK da API; join em JS).
 async function sessionDateMap(): Promise<Map<number, string>> {
-  const { data, error } = await supa().from("sessions").select("id, date");
+  const sb = await db();
+  const { data, error } = await sb.from("sessions").select("id, date");
   if (error) throw error;
   const m = new Map<number, string>();
   for (const r of (data ?? []) as { id: number; date: string }[]) m.set(r.id, r.date);
@@ -16,7 +17,8 @@ async function sessionDateMap(): Promise<Map<number, string>> {
 }
 
 export async function getSessions(limit?: number): Promise<SessionRow[]> {
-  let qb = supa()
+  const sb = await db();
+  let qb = sb
     .from("sessions")
     .select("*")
     .order("date", { ascending: false })
@@ -28,7 +30,8 @@ export async function getSessions(limit?: number): Promise<SessionRow[]> {
 }
 
 export async function getSession(id: number): Promise<SessionRow | undefined> {
-  const { data, error } = await supa()
+  const sb = await db();
+  const { data, error } = await sb
     .from("sessions")
     .select("*")
     .eq("id", id)
@@ -38,7 +41,8 @@ export async function getSession(id: number): Promise<SessionRow | undefined> {
 }
 
 export async function getEntries(sessionId: number): Promise<EntryRow[]> {
-  const { data, error } = await supa()
+  const sb = await db();
+  const { data, error } = await sb
     .from("entries")
     .select("*")
     .eq("session_id", sessionId)
@@ -63,7 +67,8 @@ interface MiniEntry {
 export async function getSessionsWithSummary(
   limit?: number
 ): Promise<SessionWithCount[]> {
-  let qb = supa()
+  const sb = await db();
+  let qb = sb
     .from("sessions")
     .select("*")
     .order("date", { ascending: false })
@@ -75,7 +80,7 @@ export async function getSessionsWithSummary(
   if (!list.length) return [];
 
   const ids = list.map((s) => s.id);
-  const { data: ents, error: e2 } = await supa()
+  const { data: ents, error: e2 } = await sb
     .from("entries")
     .select("session_id, lever, max_hold_s, is_skill")
     .in("session_id", ids);
@@ -119,8 +124,9 @@ interface SkillEntry {
 export async function getSkillProgress(
   pattern: "front" | "planche"
 ): Promise<SkillPoint[]> {
+  const sb = await db();
   const [entsRes, dateMap] = await Promise.all([
-    supa()
+    sb
       .from("entries")
       .select("max_hold_s, lever, exercise, session_id")
       .eq("is_skill", 1)
@@ -150,7 +156,8 @@ export interface PainPoint {
 }
 
 export async function getPainHistory(): Promise<PainPoint[]> {
-  const { data, error } = await supa()
+  const sb = await db();
+  const { data, error } = await sb
     .from("sessions")
     .select("date, elbow_pain, lower_back, day_code, id")
     .order("date", { ascending: true })
@@ -175,8 +182,8 @@ export interface Stats {
 }
 
 export async function getStats(): Promise<Stats> {
-  const client = supa();
-  const totalRes = await client
+  const sb = await db();
+  const totalRes = await sb
     .from("sessions")
     .select("*", { count: "exact", head: true });
   if (totalRes.error) throw totalRes.error;
@@ -185,14 +192,14 @@ export async function getStats(): Promise<Stats> {
   const sevenDaysAgo = new Date();
   sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
   const iso = sevenDaysAgo.toISOString().slice(0, 10);
-  const weekRes = await client
+  const weekRes = await sb
     .from("sessions")
     .select("*", { count: "exact", head: true })
     .gte("date", iso);
   if (weekRes.error) throw weekRes.error;
   const thisWeek = weekRes.count ?? 0;
 
-  const datesRes = await client.from("sessions").select("date");
+  const datesRes = await sb.from("sessions").select("date");
   if (datesRes.error) throw datesRes.error;
   const allDates = ((datesRes.data ?? []) as { date: string }[]).map((r) => r.date);
   const dates = [...new Set(allDates)];
@@ -238,8 +245,9 @@ export async function getCurrentLevers(): Promise<{
   front: string | null;
   planche: string | null;
 }> {
+  const sb = await db();
   const [entsRes, dateMap] = await Promise.all([
-    supa()
+    sb
       .from("entries")
       .select("lever, exercise, session_id")
       .eq("is_skill", 1)
@@ -284,7 +292,8 @@ export async function getBestHolds(): Promise<{
   front: number | null;
   planche: number | null;
 }> {
-  const { data, error } = await supa()
+  const sb = await db();
+  const { data, error } = await sb
     .from("entries")
     .select("exercise, lever, max_hold_s")
     .eq("is_skill", 1);

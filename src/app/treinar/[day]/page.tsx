@@ -1,8 +1,8 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
-import { dayByCode } from "@/lib/plan";
 import { getSetting } from "@/lib/db";
 import { getCurrentLevers } from "@/lib/queries";
+import { getActiveProgramRuntime } from "@/lib/programs";
 import { weekFromStart, blockForWeek } from "@/lib/cycle";
 import SessionForm from "@/components/SessionForm";
 import WorkoutPlayer from "@/components/WorkoutPlayer";
@@ -17,18 +17,28 @@ export default async function DayPage({
   params: Promise<{ day: string }>;
   searchParams: Promise<{ modo?: string }>;
 }) {
-  const { day: code } = await params;
+  const { day: rawCode } = await params;
   const { modo } = await searchParams;
-  const day = dayByCode(code.toUpperCase());
-  if (!day) notFound();
+  const code = rawCode.toUpperCase();
 
-  const [cycleStart, levers] = await Promise.all([
+  const [runtime, cycleStart, levers] = await Promise.all([
+    getActiveProgramRuntime(),
     getSetting("cycle_start"),
     getCurrentLevers(),
   ]);
+
+  const day = runtime.days.find((d) => d.code === code);
+  if (!day) notFound();
+
   const week = weekFromStart(cycleStart);
   const block = blockForWeek(week);
   const today = new Date().toISOString().slice(0, 10);
+
+  // FKs do programa p/ vincular as entries (T-006). Vazio quando vem da semente.
+  const refs = runtime.refMap.get(code);
+  const programDayId = refs ? [...refs.values()][0]?.programDayId ?? null : null;
+  const exerciseRefs: Record<string, string> = {};
+  if (refs) for (const [name, ref] of refs) exerciseRefs[name] = ref.dayExerciseId;
 
   if (modo === "manual") {
     return (
@@ -45,6 +55,9 @@ export default async function DayPage({
           defaultWeek={week}
           defaultBlock={block}
           suggestedLevers={levers}
+          programId={runtime.programId}
+          programDayId={programDayId}
+          exerciseRefs={exerciseRefs}
         />
       </div>
     );
@@ -57,6 +70,8 @@ export default async function DayPage({
       defaultWeek={week}
       defaultBlock={block}
       suggestedLevers={levers}
+      programDayId={programDayId}
+      exerciseRefs={exerciseRefs}
     />
   );
 }

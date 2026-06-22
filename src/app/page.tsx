@@ -9,18 +9,15 @@ import {
 } from "@/lib/queries";
 import { buildReport } from "@/lib/coach";
 import { weekFromStart, cycleWeek, cycleNumber, blockForWeek } from "@/lib/cycle";
-import {
-  PLAN,
-  FL_PROGRESSION,
-  PLANCHE_PROGRESSION,
-  leverIndex,
-} from "@/lib/plan";
+import { leverIndex } from "@/lib/plan";
+import { getActiveProgramRuntime, ladderBySlug } from "@/lib/programs";
+import NoProgramCTA from "@/components/NoProgramCTA";
 
 export const dynamic = "force-dynamic";
 
-function nextDay(lastCode: string | null): string {
-  const order = PLAN.map((d) => d.code);
-  if (!lastCode) return "D1";
+function nextDay(order: string[], lastCode: string | null): string {
+  if (!order.length) return "D1";
+  if (!lastCode) return order[0];
   const idx = order.indexOf(lastCode);
   return order[(idx + 1) % order.length];
 }
@@ -43,12 +40,13 @@ function Rungs({ count, idx, color }: { count: number; idx: number; color: strin
 }
 
 export default async function Home() {
-  const [stats, recent, levers, best, cycleStart] = await Promise.all([
+  const [stats, recent, levers, best, cycleStart, runtime] = await Promise.all([
     getStats(),
     getSessionsWithSummary(1),
     getCurrentLevers(),
     getBestHolds(),
     getSetting("cycle_start"),
+    getActiveProgramRuntime(),
   ]);
   const week = weekFromStart(cycleStart);
   const cw = cycleWeek(week);
@@ -56,10 +54,14 @@ export default async function Home() {
   const block = blockForWeek(week);
   const report = buildReport({ ...(await getCoachData()), block });
 
-  const suggested = nextDay(recent[0]?.day_code ?? null);
-  const suggestedDay = PLAN.find((d) => d.code === suggested)!;
-  const flIdx = leverIndex(FL_PROGRESSION, levers.front);
-  const plIdx = leverIndex(PLANCHE_PROGRESSION, levers.planche);
+  const order = runtime.days.map((d) => d.code);
+  const suggested = nextDay(order, recent[0]?.day_code ?? null);
+  const suggestedDay =
+    runtime.days.find((d) => d.code === suggested) ?? runtime.days[0];
+  const flLadder = ladderBySlug(runtime.ladders, "front-lever");
+  const plLadder = ladderBySlug(runtime.ladders, "planche");
+  const flIdx = leverIndex(flLadder, levers.front);
+  const plIdx = leverIndex(plLadder, levers.planche);
 
   // anel de progresso da semana do ciclo
   const r = 92;
@@ -68,6 +70,7 @@ export default async function Home() {
 
   return (
     <div className="px-[18px] pb-28 pt-14">
+      {runtime.fromSeed && <NoProgramCTA variant="banner" />}
       {/* header */}
       <div className="mb-1.5 flex animate-fadeUp items-center justify-between">
         <div>
@@ -134,6 +137,7 @@ export default async function Home() {
               {suggestedDay.code} · {suggestedDay.focus.split(" + ")[0]}
             </div>
             <div className="mt-1 text-xs text-muted">{suggestedDay.character}</div>
+            {/* programa ativo (ou semente) */}
           </div>
           <span
             className="flex h-[58px] w-[58px] shrink-0 items-center justify-center rounded-full bg-accent"
@@ -144,6 +148,22 @@ export default async function Home() {
         </div>
       </Link>
 
+      {/* atalhos freestyle (006) */}
+      <div className="mt-2.5 flex animate-fadeUp gap-2.5">
+        <Link
+          href="/treinar/avulso"
+          className="flex flex-1 items-center justify-center gap-1.5 rounded-[13px] border border-white/[0.08] bg-surface py-3 font-mono text-[11px] tracking-[0.1em] text-ink-soft"
+        >
+          ⚡ SESSÃO AVULSA
+        </Link>
+        <Link
+          href="/montar"
+          className="flex flex-1 items-center justify-center gap-1.5 rounded-[13px] border border-white/[0.08] bg-surface py-3 font-mono text-[11px] tracking-[0.1em] text-ink-soft"
+        >
+          ✎ MONTAR ROTINA
+        </Link>
+      </div>
+
       {/* alavancas */}
       <div className="mt-3.5 grid grid-cols-2 gap-3">
         <div className="card animate-fadeUp">
@@ -152,7 +172,7 @@ export default async function Home() {
             <span className="font-mono text-[10px] text-muted-2">PR {best.front ?? "—"}s</span>
           </div>
           <div className="mt-2 font-display text-[21px] leading-none">{levers.front ?? "—"}</div>
-          <Rungs count={FL_PROGRESSION.length} idx={flIdx} color="#D6FB3D" />
+          <Rungs count={flLadder.length} idx={flIdx} color="#D6FB3D" />
         </div>
         <div className="card animate-fadeUp">
           <div className="flex items-center justify-between">
@@ -160,7 +180,7 @@ export default async function Home() {
             <span className="font-mono text-[10px] text-muted-2">PR {best.planche ?? "—"}s</span>
           </div>
           <div className="mt-2 font-display text-[21px] leading-none">{levers.planche ?? "—"}</div>
-          <Rungs count={PLANCHE_PROGRESSION.length} idx={plIdx} color="#7FE7FF" />
+          <Rungs count={plLadder.length} idx={plIdx} color="#7FE7FF" />
         </div>
       </div>
 

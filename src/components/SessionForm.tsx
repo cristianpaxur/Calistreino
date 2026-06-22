@@ -43,13 +43,20 @@ export default function SessionForm({
   defaultWeek,
   defaultBlock,
   suggestedLevers,
+  programId = null,
+  programDayId = null,
+  exerciseRefs = {},
 }: {
   day: PlanDay;
   defaultDate: string;
   defaultWeek: number;
   defaultBlock: string;
   suggestedLevers: { front: string | null; planche: string | null };
+  programId?: string | null;
+  programDayId?: string | null;
+  exerciseRefs?: Record<string, string>;
 }) {
+  void programId; // disponível p/ extensões futuras; vínculo é via programDayId
   const [entries, setEntries] = useState<EntryState[]>(
     day.exercises.map(fromPlan)
   );
@@ -72,6 +79,7 @@ export default function SessionForm({
       className="space-y-6"
     >
       <input type="hidden" name="day_code" value={day.code} />
+      {programDayId && <input type="hidden" name="program_day_id" value={programDayId} />}
 
       {/* Cabeçalho da sessão */}
       <div className="card grid gap-4 sm:grid-cols-2">
@@ -118,6 +126,7 @@ export default function SessionForm({
             <input type="hidden" name="ex_category" value={e.category} />
             <input type="hidden" name="ex_is_skill" value={e.isSkill ? "1" : "0"} />
             <input type="hidden" name="ex_done" value={e.done ? "1" : "0"} />
+            <input type="hidden" name="ex_day_exercise_id" value={exerciseRefs[e.name] ?? ""} />
 
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">

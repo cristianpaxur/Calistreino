@@ -6,6 +6,8 @@ import type { PlanDay, PlanExercise } from "@/lib/plan";
 import { saveWorkout, type WorkoutInput } from "@/app/actions";
 import { catOf } from "@/components/ui";
 import { useVoiceCommands, speak } from "@/components/useVoiceCommands";
+import ExercisePicker from "@/components/ExercisePicker";
+import type { ExerciseOption } from "@/lib/exercise-catalog";
 
 interface EntryState {
   name: string;
@@ -59,18 +61,42 @@ function beep() {
   if (typeof navigator !== "undefined" && navigator.vibrate) navigator.vibrate(60);
 }
 
+function fromOption(o: ExerciseOption): EntryState {
+  return {
+    name: o.name,
+    category: o.category,
+    isSkill: o.isSkill,
+    prescription: "",
+    lever: "",
+    holds: [],
+    setsDone: 0,
+    done: false,
+  };
+}
+
 export default function WorkoutPlayer({
   day,
   defaultDate,
   defaultWeek,
   defaultBlock,
   suggestedLevers,
+  programDayId = null,
+  exerciseRefs = {},
+  freestyle = false,
+  catalog = [],
 }: {
   day: PlanDay;
   defaultDate: string;
   defaultWeek: number;
   defaultBlock: string;
   suggestedLevers: { front: string | null; planche: string | null };
+  programDayId?: string | null;
+  /** nome do exercício → day_exercise_id (vínculo com o programa, 004). */
+  exerciseRefs?: Record<string, string>;
+  /** 006: sessão avulsa — começa vazio e adiciona exercícios em runtime. */
+  freestyle?: boolean;
+  /** catálogo p/ o picker da sessão avulsa (biblioteca real ou fallback PLAN). */
+  catalog?: ExerciseOption[];
 }) {
   const router = useRouter();
   const [entries, setEntries] = useState<EntryState[]>(() =>
@@ -84,9 +110,18 @@ export default function WorkoutPlayer({
       return e;
     })
   );
-  const total = day.exercises.length;
+  const [picking, setPicking] = useState(false);
+  const total = entries.length;
   const [step, setStep] = useState(0);
-  const isSummary = step >= total;
+  // Em sessão avulsa, com 0 exercícios mostramos a tela inicial (não o resumo).
+  const isEmpty = freestyle && total === 0;
+  const isSummary = !isEmpty && step >= total;
+
+  const addExercise = (o: ExerciseOption) => {
+    setStep(entries.length); // salta para o exercício recém-adicionado
+    setEntries((prev) => [...prev, fromOption(o)]);
+    setPicking(false);
+  };
 
   const [elapsed, setElapsed] = useState(0);
   const [rest, setRest] = useState<number | null>(null);
@@ -168,6 +203,7 @@ export default function WorkoutPlayer({
       elbowPain: elbow,
       lowerBack: back,
       notes: null,
+      programDayId,
       entries: entries.map((e) => ({
         exercise: e.name,
         category: e.category,
@@ -179,6 +215,7 @@ export default function WorkoutPlayer({
         rir: null,
         done: e.done,
         notes: null,
+        dayExerciseId: exerciseRefs[e.name] ?? null,
       })),
     };
     try {
@@ -236,38 +273,95 @@ export default function WorkoutPlayer({
     );
   }
 
+  // ---------- SESSÃO AVULSA: VAZIA ----------
+  if (isEmpty) {
+    return (
+      <>
+        <div className="px-[18px] pb-28 pt-14">
+          <div className="animate-fadeUp text-center">
+            <div className="font-mono text-[10px] tracking-[0.22em] text-accent">
+              SESSÃO AVULSA · {fmt(elapsed)}
+            </div>
+            <div className="mt-2 font-display text-[32px] leading-none">TREINO DE HOJE</div>
+            <p className="mx-auto mt-3 max-w-[280px] text-[13px] leading-relaxed text-muted">
+              Comece vazio e adicione exercícios na hora — da biblioteca ou
+              criando o seu. Tudo grava no histórico como qualquer treino.
+            </p>
+            <button
+              onClick={() => setPicking(true)}
+              className="btn-lime mx-auto mt-6 flex h-[52px] w-full max-w-[260px] text-[16px]"
+            >
+              + ADICIONAR EXERCÍCIO
+            </button>
+            <button
+              onClick={() => router.push("/")}
+              className="mx-auto mt-2.5 block font-mono text-[11px] text-muted-2"
+            >
+              cancelar
+            </button>
+          </div>
+        </div>
+        {picking && (
+          <ExercisePicker
+            catalog={catalog}
+            onPick={addExercise}
+            onClose={() => setPicking(false)}
+          />
+        )}
+      </>
+    );
+  }
+
   // ---------- RESUMO ----------
   if (isSummary) {
     return (
-      <div className="px-[18px] pb-28 pt-14">
-        <div className="animate-fadeUp">
-          <div className="font-display text-[30px] leading-none">COMO FOI?</div>
-          <div className="mt-1 text-xs text-muted">
-            {doneCount}/{total} feitos · {fmt(elapsed)} de treino
+      <>
+        <div className="px-[18px] pb-28 pt-14">
+          <div className="animate-fadeUp">
+            <div className="font-display text-[30px] leading-none">COMO FOI?</div>
+            <div className="mt-1 text-xs text-muted">
+              {doneCount}/{total} feitos · {fmt(elapsed)} de treino
+            </div>
+            <div className="card mt-[18px]">
+              <div className="label">Dor — cotovelo</div>
+              <PainScale value={elbow} onSet={setElbow} />
+              <div className="label mt-4">Dor — lombar</div>
+              <PainScale value={back} onSet={setBack} />
+            </div>
+            {freestyle && (
+              <button
+                onClick={() => setPicking(true)}
+                className="btn-dark mt-3 flex h-[48px] w-full text-[14px]"
+              >
+                + ADICIONAR OUTRO EXERCÍCIO
+              </button>
+            )}
+            <button onClick={save} disabled={saving} className="btn-lime mt-4 flex h-14 w-full">
+              <span className="text-[20px]">{saving ? "SALVANDO..." : "✓ SALVAR TREINO"}</span>
+            </button>
+            <button
+              onClick={() => setStep(total - 1)}
+              className="mt-2.5 w-full text-center font-mono text-[11px] text-muted-2"
+            >
+              ← voltar aos exercícios
+            </button>
           </div>
-          <div className="card mt-[18px]">
-            <div className="label">Dor — cotovelo</div>
-            <PainScale value={elbow} onSet={setElbow} />
-            <div className="label mt-4">Dor — lombar</div>
-            <PainScale value={back} onSet={setBack} />
-          </div>
-          <button onClick={save} disabled={saving} className="btn-lime mt-4 flex h-14 w-full">
-            <span className="text-[20px]">{saving ? "SALVANDO..." : "✓ SALVAR TREINO"}</span>
-          </button>
-          <button
-            onClick={() => setStep(total - 1)}
-            className="mt-2.5 w-full text-center font-mono text-[11px] text-muted-2"
-          >
-            ← voltar aos exercícios
-          </button>
         </div>
-      </div>
+        {picking && (
+          <ExercisePicker
+            catalog={catalog}
+            onPick={addExercise}
+            onClose={() => setPicking(false)}
+          />
+        )}
+      </>
     );
   }
 
   // ---------- PLAYER ----------
   const k = catOf(cur!.category);
   return (
+    <>
     <div className="px-[18px] pb-28 pt-14">
       {/* header */}
       <div className="flex items-start justify-between">
@@ -455,7 +549,24 @@ export default function WorkoutPlayer({
           {step === total - 1 ? "FINALIZAR →" : "PRÓXIMO →"}
         </button>
       </div>
+
+      {freestyle && (
+        <button
+          onClick={() => setPicking(true)}
+          className="mt-2.5 w-full text-center font-mono text-[11px] text-accent"
+        >
+          + adicionar exercício
+        </button>
+      )}
     </div>
+    {picking && (
+      <ExercisePicker
+        catalog={catalog}
+        onPick={addExercise}
+        onClose={() => setPicking(false)}
+      />
+    )}
+    </>
   );
 }
 

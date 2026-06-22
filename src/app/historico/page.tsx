@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { getSessionsWithSummary, getStats } from "@/lib/queries";
-import { PLAN } from "@/lib/plan";
+import { getActiveProgramRuntime } from "@/lib/programs";
 import { PageTitle, PainPill } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
@@ -18,10 +18,15 @@ function isoLocal(d: Date) {
 }
 
 export default async function HistoricoPage() {
-  const [sessions, stats] = await Promise.all([
+  const [sessions, stats, runtime] = await Promise.all([
     getSessionsWithSummary(),
     getStats(),
+    getActiveProgramRuntime(),
   ]);
+  // Rótulo do dia (code → título) a partir do programa ativo (ou semente).
+  // Sessões avulsas (006) usam o code "AVULSO" e ganham rótulo próprio.
+  const titleByCode = new Map(runtime.days.map((d) => [d.code, d.title]));
+  titleByCode.set("AVULSO", "Sessão avulsa");
 
   // heatmap — 12 semanas × 7 dias terminando hoje
   const counts = new Map<string, number>();
@@ -104,7 +109,7 @@ export default async function HistoricoPage() {
             <div className="flex flex-col gap-2">
               {list.map((s) => {
                 const d = new Date(s.date + "T00:00:00");
-                const title = PLAN.find((p) => p.code === s.day_code)?.title ?? s.day_code;
+                const title = titleByCode.get(s.day_code) ?? s.day_code;
                 return (
                   <Link
                     key={s.id}

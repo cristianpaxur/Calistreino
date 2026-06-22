@@ -1,13 +1,15 @@
-import { PLAN, PERIODIZATION } from "@/lib/plan";
+import type { CycleWeek } from "@/lib/plan";
 import { getSetting } from "@/lib/db";
+import { getActiveProgramRuntime } from "@/lib/programs";
 import { weekFromStart, cycleWeek } from "@/lib/cycle";
 import { PageTitle } from "@/components/ui";
 import PlanBlocks from "@/components/PlanBlocks";
+import NoProgramCTA from "@/components/NoProgramCTA";
 
 export const dynamic = "force-dynamic";
 
-function currentWeeks(cw: number): string {
-  const found = PERIODIZATION.find((p) => {
+function currentWeeks(periodization: CycleWeek[], cw: number): string {
+  const found = periodization.find((p) => {
     if (p.weeks.includes("-")) {
       const [a, b] = p.weeks.split("-").map(Number);
       return cw >= a && cw <= b;
@@ -18,24 +20,34 @@ function currentWeeks(cw: number): string {
 }
 
 export default async function PlanoPage() {
-  const week = weekFromStart(await getSetting("cycle_start"));
+  const [cycleStart, runtime] = await Promise.all([
+    getSetting("cycle_start"),
+    getActiveProgramRuntime(),
+  ]);
+  const week = weekFromStart(cycleStart);
   const cw = cycleWeek(week);
-  const curWeeks = currentWeeks(cw);
+  const curWeeks = currentWeeks(runtime.periodization, cw);
 
   return (
     <div className="px-[18px] pb-28 pt-14">
-      <PageTitle title="O PLANO" subtitle="Periodização · Front Lever + Planche" />
+      <PageTitle title="O PLANO" subtitle={`Periodização · ${runtime.name}`} />
+
+      {runtime.fromSeed && (
+        <div className="mt-4">
+          <NoProgramCTA variant="banner" />
+        </div>
+      )}
 
       <div className="mb-2.5 mt-5 font-mono text-[10px] tracking-[0.2em] text-muted-2">
-        CICLO DE 12 SEMANAS
+        CICLO DE {runtime.cycleWeeks} SEMANAS
       </div>
-      <PlanBlocks blocks={PERIODIZATION} currentWeeks={curWeeks} />
+      <PlanBlocks blocks={runtime.periodization} currentWeeks={curWeeks} />
 
       <div className="mb-2.5 mt-[22px] font-mono text-[10px] tracking-[0.2em] text-muted-2">
         SEMANA TIPO
       </div>
       <div className="flex flex-col gap-[7px]">
-        {PLAN.map((d) => (
+        {runtime.days.map((d) => (
           <div
             key={d.code}
             className="flex items-center gap-3 rounded-xl border border-white/[0.06] bg-surface px-3.5 py-3"

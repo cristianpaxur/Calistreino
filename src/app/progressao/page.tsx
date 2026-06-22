@@ -3,7 +3,8 @@ import {
   getPainHistory,
   getCurrentLevers,
 } from "@/lib/queries";
-import { FL_PROGRESSION, PLANCHE_PROGRESSION, leverIndex } from "@/lib/plan";
+import { leverIndex } from "@/lib/plan";
+import { getActiveProgramRuntime, ladderBySlug } from "@/lib/programs";
 import { PageTitle } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
@@ -54,12 +55,15 @@ function Ladder({
 }
 
 export default async function ProgressaoPage() {
-  const [frontPts, planchePts, painHist, levers] = await Promise.all([
+  const [frontPts, planchePts, painHist, levers, runtime] = await Promise.all([
     getSkillProgress("front"),
     getSkillProgress("planche"),
     getPainHistory(),
     getCurrentLevers(),
+    getActiveProgramRuntime(),
   ]);
+  const flLadder = ladderBySlug(runtime.ladders, "front-lever");
+  const plLadder = ladderBySlug(runtime.ladders, "planche");
   const front = frontPts.map((p) => p.max_hold_s);
   const planche = planchePts.map((p) => p.max_hold_s);
   const pain = painHist
@@ -118,11 +122,11 @@ export default async function ProgressaoPage() {
       <div className="mt-3.5 grid grid-cols-2 gap-3">
         <div className="card animate-fadeUp">
           <div className="font-mono text-[10px] tracking-[0.14em] text-accent">FRONT LEVER</div>
-          <Ladder steps={FL_PROGRESSION} idx={leverIndex(FL_PROGRESSION, levers.front)} color="#D6FB3D" />
+          <Ladder steps={flLadder} idx={leverIndex(flLadder, levers.front)} color="#D6FB3D" />
         </div>
         <div className="card animate-fadeUp">
           <div className="font-mono text-[10px] tracking-[0.14em] text-cyan">PLANCHE</div>
-          <Ladder steps={PLANCHE_PROGRESSION} idx={leverIndex(PLANCHE_PROGRESSION, levers.planche)} color="#7FE7FF" />
+          <Ladder steps={plLadder} idx={leverIndex(plLadder, levers.planche)} color="#7FE7FF" />
         </div>
       </div>
 

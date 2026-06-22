@@ -1,9 +1,10 @@
 import Link from "next/link";
 import { getSetting } from "@/lib/db";
+import { createClient } from "@/lib/supabase-server";
 import { saveSettings } from "@/app/actions";
-import { logout } from "@/app/auth-actions";
-import { getAuthConfig } from "@/lib/auth";
+import { signOut } from "@/app/auth-actions";
 import { weekFromStart, blockForWeek, cycleWeek, cycleNumber } from "@/lib/cycle";
+import { getTier } from "@/lib/billing";
 import { PageTitle } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
@@ -11,7 +12,9 @@ export const dynamic = "force-dynamic";
 export default async function ConfiguracoesPage() {
   const cycleStart = await getSetting("cycle_start");
   const week = weekFromStart(cycleStart);
-  const { enabled: authEnabled } = getAuthConfig();
+  const sb = await createClient();
+  const { data: { user } } = await sb.auth.getUser();
+  const isPro = (await getTier()) === "pro";
 
   return (
     <div className="px-[18px] pb-28 pt-14">
@@ -43,17 +46,48 @@ export default async function ConfiguracoesPage() {
         </button>
       </form>
 
-      {authEnabled && (
-        <form action={logout} className="card mt-3.5 flex items-center justify-between">
-          <div>
-            <div className="text-sm font-semibold">Sessão</div>
-            <p className="text-xs text-muted">Autenticado neste dispositivo.</p>
-          </div>
-          <button type="submit" className="btn-dark h-11 px-4 text-[14px] text-danger-soft">
-            🚪 SAIR
-          </button>
-        </form>
-      )}
+      {/* Anamnese (007 / T-008): reabrível/editável a qualquer momento, mesmo
+          para quem entrou no freestyle. */}
+      <Link
+        href="/onboarding/anamnese"
+        className="card mt-3.5 flex items-center justify-between gap-3"
+      >
+        <div className="min-w-0">
+          <div className="text-sm font-semibold">Plano personalizado</div>
+          <p className="truncate text-xs text-muted">Responder / editar a anamnese</p>
+        </div>
+        <span className="font-mono text-[11px] text-accent">abrir →</span>
+      </Link>
+
+      {/* Assinatura (010): estado do plano + acesso ao billing. */}
+      <Link href="/billing" className="card mt-3.5 flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-sm font-semibold">Assinatura</div>
+          <p className="truncate text-xs text-muted">
+            {isPro ? "Plano Pro ativo" : "Plano Grátis — IA + analytics no Pro"}
+          </p>
+        </div>
+        <span
+          className="shrink-0 rounded-full px-2.5 py-1 font-mono text-[10px] tracking-[0.12em]"
+          style={
+            isPro
+              ? { background: "rgba(214,251,61,.12)", color: "#D6FB3D" }
+              : { background: "rgba(255,255,255,.06)", color: "#9A9AA4" }
+          }
+        >
+          {isPro ? "PRO" : "FREE"}
+        </span>
+      </Link>
+
+      <form action={signOut} className="card mt-3.5 flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-sm font-semibold">Conta</div>
+          <p className="truncate text-xs text-muted">{user?.email ?? "—"}</p>
+        </div>
+        <button type="submit" className="btn-dark h-11 shrink-0 px-4 text-[14px] text-danger-soft">
+          🚪 SAIR
+        </button>
+      </form>
     </div>
   );
 }

@@ -1,34 +1,46 @@
 "use server";
 
-import { cookies } from "next/headers";
+import { createClient } from "@/lib/supabase-server";
+import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { AUTH_COOKIE, getAuthConfig, makeToken } from "@/lib/auth";
 
-export async function login(formData: FormData) {
-  const password = String(formData.get("password") ?? "");
-  const from = String(formData.get("from") ?? "/");
-  const cfg = getAuthConfig();
-
-  if (!cfg.enabled || password !== cfg.password) {
-    const back = from && from.startsWith("/") ? `&from=${encodeURIComponent(from)}` : "";
-    redirect(`/login?error=1${back}`);
-  }
-
-  const token = await makeToken(cfg.password, cfg.secret);
-  const jar = await cookies();
-  jar.set(AUTH_COOKIE, token, {
-    httpOnly: true,
-    sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
-    path: "/",
-    maxAge: 60 * 60 * 24 * 60, // 60 dias
-  });
-
-  redirect(from.startsWith("/") ? from : "/");
+function creds(formData: FormData) {
+  return {
+    email: String(formData.get("email") ?? "").trim(),
+    password: String(formData.get("password") ?? ""),
+  };
 }
 
-export async function logout() {
-  const jar = await cookies();
-  jar.delete(AUTH_COOKIE);
+export async function signIn(formData: FormData) {
+  const { email, password } = creds(formData);
+  const sb = await createClient();
+  const { error } = await sb.auth.signInWithPassword({ email, password });
+  if (error) {
+    redirect(`/login?error=${encodeURIComponent(error.message)}`);
+  }
+  revalidatePath("/", "layout");
+  redirect("/");
+}
+
+export async function signUp(formData: FormData) {
+  const { email, password } = creds(formData);
+  const sb = await createClient();
+  const { data, error } = await sb.auth.signUp({ email, password });
+  if (error) {
+    redirect(`/login?mode=signup&error=${encodeURIComponent(error.message)}`);
+  }
+  if (data.session) {
+    // Confirmação de e-mail desativada → já logado
+    revalidatePath("/", "layout");
+    redirect("/");
+  }
+  // Confirmação de e-mail ativada → avisar para checar a caixa de entrada
+  redirect("/login?check=1");
+}
+
+export async function signOut() {
+  const sb = await createClient();
+  await sb.auth.signOut();
+  revalidatePath("/", "layout");
   redirect("/login");
 }

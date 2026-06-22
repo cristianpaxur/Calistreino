@@ -1,10 +1,13 @@
 import Link from "next/link";
-import { getCoachData, getStats, getSkillProgress } from "@/lib/queries";
-import { buildReport, type Verdict } from "@/lib/coach";
-import { getSetting } from "@/lib/db";
+import { getStats, getSkillProgress, getPainHistory } from "@/lib/queries";
+import { type Verdict } from "@/lib/coach";
 import { getAiConfig } from "@/lib/ai";
-import { weekFromStart, blockForWeek } from "@/lib/cycle";
+import { getTier } from "@/lib/billing";
+import { evaluateActiveProgram } from "@/lib/progression-io";
 import CoachPanel from "@/components/CoachPanel";
+import MilestonesPanel from "@/components/MilestonesPanel";
+import AdjustmentsPanel from "@/components/AdjustmentsPanel";
+import GoalCompletePanel from "@/components/GoalCompletePanel";
 
 export const dynamic = "force-dynamic";
 
@@ -16,24 +19,27 @@ const vLabel: Record<Verdict, string> = {
 };
 
 export default async function CoachPage() {
-  const [data, stats, cycleStart, flPoints] = await Promise.all([
-    getCoachData(),
-    getStats(),
-    getSetting("cycle_start"),
-    getSkillProgress("front"),
-  ]);
-  const week = weekFromStart(cycleStart);
-  const block = blockForWeek(week);
-  const report = buildReport({ ...data, block });
+  const [{ evaluation, programId, fromSeed }, stats, flPoints, pain] =
+    await Promise.all([
+      evaluateActiveProgram(),
+      getStats(),
+      getSkillProgress("front"),
+      getPainHistory(),
+    ]);
+  const { report, milestones, adjustments, goalComplete, week } = evaluation;
   const ai = getAiConfig();
+  // 010: a análise por IA é feature Pro. O gate real é server-side em runAiCoach;
+  // aqui passamos o estado para o painel decidir entre rodar ou mostrar o CTA.
+  const isPro = (await getTier()) === "pro";
 
   // FL ganho no histórico
   const fl = flPoints.map((p) => p.max_hold_s);
   const flDelta = fl.length >= 2 ? fl[fl.length - 1] - fl[0] : null;
 
-  // dor média (cotovelo) das sessões recentes
-  const elbows = data.recentSessions
-    .map((s) => s.elbow_pain)
+  // dor média (cotovelo) das sessões recentes (últimas 8 com registro)
+  const elbows = pain
+    .slice(-8)
+    .map((p) => p.elbow_pain)
     .filter((v): v is number => v !== null);
   const avgPain =
     elbows.length > 0
@@ -115,9 +121,23 @@ export default async function CoachPage() {
         ))}
       </div>
 
-      {/* IA OpenAI */}
+      {/* 009: objetivo concluído → loop de novo objetivo */}
+      {goalComplete && <GoalCompletePanel />}
+
+      {/* 009: milestones do objetivo */}
+      <MilestonesPanel milestones={milestones} />
+
+      {/* 009: ajustes sugeridos pelo coach */}
+      <AdjustmentsPanel
+        adjustments={adjustments}
+        programId={programId}
+        week={week}
+        canApply={!fromSeed && !!programId}
+      />
+
+      {/* IA OpenAI (010: feature Pro) */}
       <div className="mt-3.5">
-        <CoachPanel enabled={ai.enabled} />
+        <CoachPanel enabled={ai.enabled} isPro={isPro} />
       </div>
 
       <div className="card mt-3.5">

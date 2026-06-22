@@ -6,9 +6,20 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "verify:seed": "node scripts/verify-seed.ts",
+    "verify:adapter": "node scripts/verify-adapter.ts",
+    "verify:content": "node scripts/verify-content.ts",
+    "verify:routine": "node scripts/verify-routine.ts",
+    "verify:anamnese": "node scripts/verify-anamnese.ts",
+    "verify:plan": "node scripts/verify-plan.ts",
+    "verify:progression": "node scripts/verify-progression.ts",
+    "verify:entitlements": "node scripts/verify-entitlements.ts",
+    "seed:program": "node scripts/seed-program.ts",
+    "seed": "node scripts/seed.ts"
   },
   "dependencies": {
+    "@supabase/ssr": "^0.12.0",
     "@supabase/supabase-js": "^2.108.2",
     "next": "^15.5.19",
     "openai": "^6.44.0",

@@ -1,6 +1,6 @@
 # CalisTreino 💪
 
-App pessoal para controlar treinos de calistenia (plano **Front Lever + Planche**), feito em **Next.js + SQLite**. Roda 100% local — seus dados ficam no arquivo `data/calistreino.db`.
+App de calistenia (plano **Front Lever + Planche**), feito em **Next.js + Supabase**. Os dados ficam no Postgres do Supabase, acessado pela **API (PostgREST/supabase-js)** — sem conexão TCP.
 
 ## Funcionalidades
 
@@ -24,25 +24,25 @@ OPENAI_MODEL=gpt-4o-mini
 
 Pegue a chave em https://platform.openai.com/api-keys e reinicie o app.
 
-## Banco de dados (Postgres / Supabase)
+## Banco de dados (Supabase)
 
-O app usa **Postgres** via `postgres.js` (funciona com qualquer provedor: Supabase, Neon, etc.).
-Defina `DATABASE_URL` com a connection string do **pooler de transações** (porta 6543).
-As tabelas são criadas automaticamente no primeiro acesso.
+O app usa o **Supabase** via API (`@supabase/supabase-js`/PostgREST) sobre HTTPS — ideal para
+serverless (sem limite de conexão/TCP). A API **não cria tabelas**, então o schema fica em
+[`supabase/schema.sql`](supabase/schema.sql) (rode uma vez no SQL Editor).
 
 ## Supabase (passo a passo)
 
 1. Crie um projeto grátis em https://supabase.com.
-2. **Project Settings → Database → Connection string → "Transaction pooler"** (porta **6543**).
-   Copie a URL e troque `[YOUR-PASSWORD]` pela senha do banco.
-   Formato: `postgresql://postgres.<ref>:<SENHA>@aws-0-<regiao>.pooler.supabase.com:6543/postgres`
+2. **SQL Editor** → cole e rode o `supabase/schema.sql` (cria tabelas + habilita RLS).
+3. **Project Settings → API** → copie o **Project URL** e a chave **`service_role`** (secreta, só servidor).
 
 ## Como rodar (local)
 
 ```bash
 npm install
-# cole a connection string do Supabase em .env.local:
-# DATABASE_URL=postgresql://postgres.<ref>:<SENHA>@aws-0-<regiao>.pooler.supabase.com:6543/postgres
+# em .env.local:
+# SUPABASE_URL=https://<ref>.supabase.co
+# SUPABASE_SERVICE_ROLE_KEY=<service_role>
 npm run dev
 ```
 
@@ -52,14 +52,13 @@ Abra http://localhost:3000 → na primeira vez, vá em **⚙️ Ajustes** e defi
 
 1. Importe o repositório no Vercel.
 2. Em **Settings → Environment Variables**, adicione:
-   - `DATABASE_URL` = a connection string do pooler do Supabase (porta 6543)
+   - `SUPABASE_URL` e `SUPABASE_SERVICE_ROLE_KEY`
    - `APP_PASSWORD`, `AUTH_SECRET`
    - (opcional) `OPENAI_API_KEY`, `OPENAI_MODEL`
-3. **Redeploy.** As tabelas são criadas no primeiro acesso.
+3. **Redeploy.**
 
-> ⚠️ O SQLite em arquivo **não funciona** no Vercel (filesystem efêmero/somente-leitura) — por isso o banco é Postgres.
-> Use sempre a string do **pooler (6543)**, não a conexão direta (5432) — o driver já está configurado com `prepare: false` para o pgbouncer.
+> ⚠️ A chave `service_role` é secreta e **só pode ser usada no servidor** — nunca no front-end.
 
 ## Backup
 
-Os dados ficam no Postgres. Faça backup pelo painel da Neon/Vercel (snapshots) ou `pg_dump`.
+Os dados ficam no Postgres do Supabase. Faça backup pelo painel do Supabase (Database → Backups) ou `pg_dump`.

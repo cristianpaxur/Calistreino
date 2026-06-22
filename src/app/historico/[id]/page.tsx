@@ -1,8 +1,8 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import { getSession, getEntries } from "@/lib/queries";
+import { getActiveProgramRuntime } from "@/lib/programs";
 import { deleteSession } from "@/app/actions";
-import { PLAN } from "@/lib/plan";
 import { catOf, PainPill } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
@@ -16,7 +16,9 @@ export default async function SessionDetail({
   const session = await getSession(Number(id));
   if (!session) notFound();
   const entries = await getEntries(session.id);
-  const day = PLAN.find((d) => d.code === session.day_code);
+  const runtime = await getActiveProgramRuntime();
+  const dayTitle =
+    runtime.days.find((d) => d.code === session.day_code)?.title ?? "";
 
   const dateLabel = new Date(session.date + "T00:00:00").toLocaleDateString("pt-BR", {
     weekday: "long",
@@ -41,7 +43,7 @@ export default async function SessionDetail({
 
       <div className="mt-3 animate-fadeUp">
         <div className="font-display text-[30px] leading-none">
-          {session.day_code} · {day?.title ?? ""}
+          {session.day_code} · {dayTitle}
         </div>
         <div className="mt-1 text-xs capitalize text-muted">{dateLabel}</div>
       </div>

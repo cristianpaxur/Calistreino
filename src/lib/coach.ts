@@ -2,8 +2,8 @@
 // com base nas regras do PDF (avanço de alavanca, deload por cotovelo, lombar).
 // Funciona sempre, offline. A camada de IA (lib/ai.ts) é opcional e complementar.
 
-import type { SkillPoint, PainPoint } from "./queries";
-import type { SessionRow } from "./db";
+import type { SkillPoint, PainPoint } from "./queries.ts";
+import type { SessionRow } from "./db.ts";
 
 export type Verdict = "subir" | "manter" | "reduzir" | "sem-dados";
 
@@ -159,4 +159,91 @@ export function buildReport(input: {
   }
 
   return { recommendations, flags, overall, deload };
+}
+
+// ── 009: Propostas de ajuste do plano (PURO) ─────────────────────────
+// Traduz o CoachReport (regras já existentes) em ajustes concretos e auditáveis
+// ao programa: avançar a alavanca, segurar, deload ou mexer no volume. Determinístico
+// e conservador (R: nunca auto-aplica — só sugere). O IO (persistir/aplicar) fica
+// em src/lib/progression-io.ts e src/app/actions.ts.
+
+export type AdjustmentKind = "advance" | "hold" | "deload" | "volume";
+
+export interface PlanAdjustment {
+  kind: AdjustmentKind;
+  /** slug da skill afetada; null = ajuste global (ex.: deload do ciclo). */
+  skillSlug: string | null;
+  /** rótulo legível da skill (quando aplicável). */
+  skillName: string | null;
+  reasons: string[];
+  /** alavanca de origem (quando advance). */
+  fromLever: string | null;
+  /** alavanca-alvo sugerida (quando advance). */
+  toLever: string | null;
+}
+
+const SKILL_SLUG: Record<SkillRecommendation["skill"], string> = {
+  "Front Lever": "front-lever",
+  Planche: "planche",
+};
+
+/** Próxima alavanca na escada após `current` (ou null se já é a última / não casa). */
+function nextLever(levels: string[], current: string | null): string | null {
+  if (!levels.length) return null;
+  if (!current) return levels[0];
+  const cur = current.toLowerCase();
+  const idx = levels.findIndex((s) => cur.includes(s.toLowerCase().split(" ")[0]));
+  if (idx < 0) return null;
+  return idx + 1 < levels.length ? levels[idx + 1] : null;
+}
+
+/** A partir do relatório do coach, deriva os ajustes propostos ao programa (RF-002).
+ *  `ladders` (slug → níveis) permite sugerir a alavanca-alvo concreta no advance. */
+export function buildAdjustments(
+  report: CoachReport,
+  ladders: { slug: string; levels: string[] }[] = []
+): PlanAdjustment[] {
+  const out: PlanAdjustment[] = [];
+  const ladderBy = new Map(ladders.map((l) => [l.slug, l.levels]));
+
+  // Deload global (semana/condição) tem precedência: um único ajuste de deload.
+  if (report.deload) {
+    out.push({
+      kind: "deload",
+      skillSlug: null,
+      skillName: null,
+      reasons: report.flags.filter((f) => f.level !== "ok").map((f) => f.text),
+      fromLever: null,
+      toLever: null,
+    });
+    return out;
+  }
+
+  for (const rec of report.recommendations) {
+    if (rec.verdict === "sem-dados" || rec.verdict === "manter") continue;
+    const slug = SKILL_SLUG[rec.skill];
+    if (rec.verdict === "subir") {
+      const levels = ladderBy.get(slug) ?? [];
+      const to = nextLever(levels, rec.currentLever);
+      out.push({
+        kind: "advance",
+        skillSlug: slug,
+        skillName: rec.skill,
+        reasons: rec.reasons,
+        fromLever: rec.currentLever,
+        toLever: to,
+      });
+    } else if (rec.verdict === "reduzir") {
+      out.push({
+        kind: "hold",
+        skillSlug: slug,
+        skillName: rec.skill,
+        reasons: rec.reasons,
+        fromLever: rec.currentLever,
+        toLever: null,
+      });
+    }
+  }
+
+  return out;
 }
