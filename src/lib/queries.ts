@@ -1,24 +1,51 @@
-import { sql, ensureSchema, EntryRow, SessionRow } from "./db";
+import {
+  supa,
+  matchFront,
+  matchPlanche,
+  type EntryRow,
+  type SessionRow,
+} from "./db";
+
+// Mapa session_id -> date (evita depender de "embeds"/FK da API; join em JS).
+async function sessionDateMap(): Promise<Map<number, string>> {
+  const { data, error } = await supa().from("sessions").select("id, date");
+  if (error) throw error;
+  const m = new Map<number, string>();
+  for (const r of (data ?? []) as { id: number; date: string }[]) m.set(r.id, r.date);
+  return m;
+}
 
 export async function getSessions(limit?: number): Promise<SessionRow[]> {
-  await ensureSchema();
-  const rows = limit
-    ? await sql`SELECT * FROM sessions ORDER BY date DESC, id DESC LIMIT ${limit}`
-    : await sql`SELECT * FROM sessions ORDER BY date DESC, id DESC`;
-  return rows as unknown as SessionRow[];
+  let qb = supa()
+    .from("sessions")
+    .select("*")
+    .order("date", { ascending: false })
+    .order("id", { ascending: false });
+  if (limit) qb = qb.limit(limit);
+  const { data, error } = await qb;
+  if (error) throw error;
+  return (data ?? []) as SessionRow[];
 }
 
 export async function getSession(id: number): Promise<SessionRow | undefined> {
-  await ensureSchema();
-  const rows = (await sql`SELECT * FROM sessions WHERE id = ${id}`) as unknown as SessionRow[];
-  return rows[0];
+  const { data, error } = await supa()
+    .from("sessions")
+    .select("*")
+    .eq("id", id)
+    .maybeSingle();
+  if (error) throw error;
+  return (data ?? undefined) as SessionRow | undefined;
 }
 
 export async function getEntries(sessionId: number): Promise<EntryRow[]> {
-  await ensureSchema();
-  const rows =
-    await sql`SELECT * FROM entries WHERE session_id = ${sessionId} ORDER BY position, id`;
-  return rows as unknown as EntryRow[];
+  const { data, error } = await supa()
+    .from("entries")
+    .select("*")
+    .eq("session_id", sessionId)
+    .order("position", { ascending: true })
+    .order("id", { ascending: true });
+  if (error) throw error;
+  return (data ?? []) as EntryRow[];
 }
 
 export interface SessionWithCount extends SessionRow {
@@ -26,21 +53,52 @@ export interface SessionWithCount extends SessionRow {
   skill_summary: string | null;
 }
 
+interface MiniEntry {
+  session_id: number;
+  lever: string | null;
+  max_hold_s: number | null;
+  is_skill: number;
+}
+
 export async function getSessionsWithSummary(
   limit?: number
 ): Promise<SessionWithCount[]> {
-  await ensureSchema();
-  const base = `
-    SELECT s.*,
-      (SELECT COUNT(*)::int FROM entries e WHERE e.session_id = s.id) AS entry_count,
-      (SELECT string_agg(e.lever || ' ' || COALESCE(e.max_hold_s::text,'') || 's', ' · ')
-         FROM entries e WHERE e.session_id = s.id AND e.is_skill = 1 AND e.lever IS NOT NULL) AS skill_summary
-    FROM sessions s
-    ORDER BY s.date DESC, s.id DESC`;
-  const rows = limit
-    ? await sql.unsafe(base + ` LIMIT $1`, [limit])
-    : await sql.unsafe(base);
-  return rows as unknown as SessionWithCount[];
+  let qb = supa()
+    .from("sessions")
+    .select("*")
+    .order("date", { ascending: false })
+    .order("id", { ascending: false });
+  if (limit) qb = qb.limit(limit);
+  const { data, error } = await qb;
+  if (error) throw error;
+  const list = (data ?? []) as SessionRow[];
+  if (!list.length) return [];
+
+  const ids = list.map((s) => s.id);
+  const { data: ents, error: e2 } = await supa()
+    .from("entries")
+    .select("session_id, lever, max_hold_s, is_skill")
+    .in("session_id", ids);
+  if (e2) throw e2;
+
+  const byS = new Map<number, MiniEntry[]>();
+  for (const e of (ents ?? []) as MiniEntry[]) {
+    const arr = byS.get(e.session_id) ?? [];
+    arr.push(e);
+    byS.set(e.session_id, arr);
+  }
+
+  return list.map((s) => {
+    const es = byS.get(s.id) ?? [];
+    const parts = es
+      .filter((e) => e.is_skill === 1 && e.lever)
+      .map((e) => `${e.lever} ${e.max_hold_s ?? ""}s`);
+    return {
+      ...s,
+      entry_count: es.length,
+      skill_summary: parts.length ? parts.join(" · ") : null,
+    };
+  });
 }
 
 export interface SkillPoint {
@@ -51,22 +109,37 @@ export interface SkillPoint {
   session_id: number;
 }
 
-/** Histórico de max-hold por padrão de skill (FL ou Planche) para gráficos. */
+interface SkillEntry {
+  max_hold_s: number | null;
+  lever: string | null;
+  exercise: string;
+  session_id: number;
+}
+
 export async function getSkillProgress(
   pattern: "front" | "planche"
 ): Promise<SkillPoint[]> {
-  await ensureSchema();
-  const like = pattern === "front" ? "%front%" : "%planche%";
-  const fallback = pattern === "front" ? "%FL%" : "%planche%";
-  const third = pattern === "front" ? "%FL%" : "%Planche%";
-  const rows = await sql`
-    SELECT s.date AS date, e.max_hold_s AS max_hold_s, e.lever AS lever,
-           e.exercise AS exercise, s.id AS session_id
-      FROM entries e JOIN sessions s ON s.id = e.session_id
-     WHERE e.is_skill = 1 AND e.max_hold_s IS NOT NULL
-       AND (lower(e.exercise) LIKE ${like} OR e.lever LIKE ${fallback} OR e.exercise LIKE ${third})
-     ORDER BY s.date ASC, s.id ASC`;
-  return rows as unknown as SkillPoint[];
+  const [entsRes, dateMap] = await Promise.all([
+    supa()
+      .from("entries")
+      .select("max_hold_s, lever, exercise, session_id")
+      .eq("is_skill", 1)
+      .not("max_hold_s", "is", null),
+    sessionDateMap(),
+  ]);
+  if (entsRes.error) throw entsRes.error;
+  const match = pattern === "front" ? matchFront : matchPlanche;
+  return ((entsRes.data ?? []) as SkillEntry[])
+    .filter((r) => match(r.exercise, r.lever))
+    .map((r) => ({
+      date: dateMap.get(r.session_id) ?? "",
+      max_hold_s: r.max_hold_s as number,
+      lever: r.lever,
+      exercise: r.exercise,
+      session_id: r.session_id,
+    }))
+    .filter((p) => p.date)
+    .sort((a, b) => a.date.localeCompare(b.date) || a.session_id - b.session_id);
 }
 
 export interface PainPoint {
@@ -77,12 +150,20 @@ export interface PainPoint {
 }
 
 export async function getPainHistory(): Promise<PainPoint[]> {
-  await ensureSchema();
-  const rows = await sql`
-    SELECT date, elbow_pain, lower_back, day_code FROM sessions
-     WHERE elbow_pain IS NOT NULL OR lower_back IS NOT NULL
-     ORDER BY date ASC, id ASC`;
-  return rows as unknown as PainPoint[];
+  const { data, error } = await supa()
+    .from("sessions")
+    .select("date, elbow_pain, lower_back, day_code, id")
+    .order("date", { ascending: true })
+    .order("id", { ascending: true });
+  if (error) throw error;
+  return ((data ?? []) as (PainPoint & { id: number })[])
+    .filter((r) => r.elbow_pain !== null || r.lower_back !== null)
+    .map((r) => ({
+      date: r.date,
+      elbow_pain: r.elbow_pain,
+      lower_back: r.lower_back,
+      day_code: r.day_code,
+    }));
 }
 
 export interface Stats {
@@ -94,33 +175,32 @@ export interface Stats {
 }
 
 export async function getStats(): Promise<Stats> {
-  await ensureSchema();
-  const totalRows = (await sql`SELECT COUNT(*)::int AS c FROM sessions`) as unknown as {
-    c: number;
-  }[];
-  const total = totalRows[0].c;
-
-  const lastRows = (await sql`SELECT date FROM sessions ORDER BY date DESC, id DESC LIMIT 1`) as unknown as {
-    date: string;
-  }[];
+  const client = supa();
+  const totalRes = await client
+    .from("sessions")
+    .select("*", { count: "exact", head: true });
+  if (totalRes.error) throw totalRes.error;
+  const total = totalRes.count ?? 0;
 
   const sevenDaysAgo = new Date();
   sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
   const iso = sevenDaysAgo.toISOString().slice(0, 10);
-  const weekRows = (await sql`SELECT COUNT(*)::int AS c FROM sessions WHERE date >= ${iso}`) as unknown as {
-    c: number;
-  }[];
-  const thisWeek = weekRows[0].c;
+  const weekRes = await client
+    .from("sessions")
+    .select("*", { count: "exact", head: true })
+    .gte("date", iso);
+  if (weekRes.error) throw weekRes.error;
+  const thisWeek = weekRes.count ?? 0;
 
-  const dateRows = (await sql`SELECT DISTINCT date FROM sessions ORDER BY date DESC`) as unknown as {
-    date: string;
-  }[];
-  const dates = dateRows.map((r) => r.date);
+  const datesRes = await client.from("sessions").select("date");
+  if (datesRes.error) throw datesRes.error;
+  const allDates = ((datesRes.data ?? []) as { date: string }[]).map((r) => r.date);
+  const dates = [...new Set(allDates)];
 
+  const set = new Set(dates);
   let streak = 0;
   const cursor = new Date();
   cursor.setHours(0, 0, 0, 0);
-  const set = new Set(dates);
   if (!set.has(cursor.toISOString().slice(0, 10))) {
     cursor.setDate(cursor.getDate() - 1);
   }
@@ -150,30 +230,37 @@ export async function getStats(): Promise<Stats> {
     thisWeek,
     streakDays: streak,
     bestStreak: Math.max(best, streak),
-    lastDate: lastRows[0]?.date ?? null,
+    lastDate: sorted.length ? sorted[sorted.length - 1] : null,
   };
 }
 
-/** Última alavanca registrada para FL e Planche. */
 export async function getCurrentLevers(): Promise<{
   front: string | null;
   planche: string | null;
 }> {
-  await ensureSchema();
-  const frontRows = (await sql`
-    SELECT e.lever FROM entries e JOIN sessions s ON s.id = e.session_id
-     WHERE e.is_skill = 1 AND e.lever IS NOT NULL
-       AND (lower(e.exercise) LIKE '%front%' OR e.exercise LIKE '%FL%' OR e.lever LIKE '%FL%')
-     ORDER BY s.date DESC, s.id DESC LIMIT 1`) as unknown as { lever: string }[];
-  const plancheRows = (await sql`
-    SELECT e.lever FROM entries e JOIN sessions s ON s.id = e.session_id
-     WHERE e.is_skill = 1 AND e.lever IS NOT NULL
-       AND (lower(e.exercise) LIKE '%planche%' OR e.lever LIKE '%lanche%')
-     ORDER BY s.date DESC, s.id DESC LIMIT 1`) as unknown as { lever: string }[];
-  return {
-    front: frontRows[0]?.lever ?? null,
-    planche: plancheRows[0]?.lever ?? null,
-  };
+  const [entsRes, dateMap] = await Promise.all([
+    supa()
+      .from("entries")
+      .select("lever, exercise, session_id")
+      .eq("is_skill", 1)
+      .not("lever", "is", null),
+    sessionDateMap(),
+  ]);
+  if (entsRes.error) throw entsRes.error;
+  const rows = ((entsRes.data ?? []) as SkillEntry[])
+    .map((r) => ({
+      lever: r.lever,
+      exercise: r.exercise,
+      session_id: r.session_id,
+      date: dateMap.get(r.session_id) ?? "",
+    }))
+    .filter((r) => r.date);
+  const latest = (pred: (ex: string, lv: string | null) => boolean) =>
+    rows
+      .filter((r) => pred(r.exercise, r.lever))
+      .sort((a, b) => b.date.localeCompare(a.date) || b.session_id - a.session_id)[0]
+      ?.lever ?? null;
+  return { front: latest(matchFront), planche: latest(matchPlanche) };
 }
 
 export interface CoachData {
@@ -193,21 +280,25 @@ export async function getCoachData(): Promise<CoachData> {
   return { front, planche, pain, recentSessions };
 }
 
-/** Melhor (maior) max-hold por skill. */
 export async function getBestHolds(): Promise<{
   front: number | null;
   planche: number | null;
 }> {
-  await ensureSchema();
-  const f = (await sql`
-    SELECT MAX(e.max_hold_s) AS m FROM entries e
-     WHERE e.is_skill = 1 AND (lower(e.exercise) LIKE '%front%' OR e.exercise LIKE '%FL%' OR e.lever LIKE '%FL%')`) as unknown as {
-    m: number | null;
+  const { data, error } = await supa()
+    .from("entries")
+    .select("exercise, lever, max_hold_s")
+    .eq("is_skill", 1);
+  if (error) throw error;
+  const rows = (data ?? []) as {
+    exercise: string;
+    lever: string | null;
+    max_hold_s: number | null;
   }[];
-  const p = (await sql`
-    SELECT MAX(e.max_hold_s) AS m FROM entries e
-     WHERE e.is_skill = 1 AND (lower(e.exercise) LIKE '%planche%' OR e.lever LIKE '%lanche%')`) as unknown as {
-    m: number | null;
-  }[];
-  return { front: f[0]?.m ?? null, planche: p[0]?.m ?? null };
+  const maxOf = (pred: (ex: string, lv: string | null) => boolean) => {
+    const vals = rows
+      .filter((r) => r.max_hold_s !== null && pred(r.exercise, r.lever))
+      .map((r) => r.max_hold_s as number);
+    return vals.length ? Math.max(...vals) : null;
+  };
+  return { front: maxOf(matchFront), planche: maxOf(matchPlanche) };
 }

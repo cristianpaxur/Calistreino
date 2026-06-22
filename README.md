@@ -24,18 +24,25 @@ OPENAI_MODEL=gpt-4o-mini
 
 Pegue a chave em https://platform.openai.com/api-keys e reinicie o app.
 
-## Banco de dados (Postgres / Neon)
+## Banco de dados (Postgres / Supabase)
 
-O app usa **Postgres** via driver serverless da Neon (`@neondatabase/serverless`).
-Defina a variável `DATABASE_URL` (ou `POSTGRES_URL`) com a string de conexão.
+O app usa **Postgres** via `postgres.js` (funciona com qualquer provedor: Supabase, Neon, etc.).
+Defina `DATABASE_URL` com a connection string do **pooler de transações** (porta 6543).
 As tabelas são criadas automaticamente no primeiro acesso.
+
+## Supabase (passo a passo)
+
+1. Crie um projeto grátis em https://supabase.com.
+2. **Project Settings → Database → Connection string → "Transaction pooler"** (porta **6543**).
+   Copie a URL e troque `[YOUR-PASSWORD]` pela senha do banco.
+   Formato: `postgresql://postgres.<ref>:<SENHA>@aws-0-<regiao>.pooler.supabase.com:6543/postgres`
 
 ## Como rodar (local)
 
 ```bash
 npm install
-# crie um banco grátis na Neon (neon.tech) e cole a string em .env.local:
-# DATABASE_URL=postgresql://...neon.tech/...?sslmode=require
+# cole a connection string do Supabase em .env.local:
+# DATABASE_URL=postgresql://postgres.<ref>:<SENHA>@aws-0-<regiao>.pooler.supabase.com:6543/postgres
 npm run dev
 ```
 
@@ -44,12 +51,14 @@ Abra http://localhost:3000 → na primeira vez, vá em **⚙️ Ajustes** e defi
 ## Deploy no Vercel
 
 1. Importe o repositório no Vercel.
-2. Em **Storage → Create Database → Postgres (Neon)**, conecte ao projeto.
-   Isso injeta `DATABASE_URL`/`POSTGRES_URL` automaticamente.
-3. Adicione as variáveis: `APP_PASSWORD`, `AUTH_SECRET` e (opcional) `OPENAI_API_KEY`, `OPENAI_MODEL`.
-4. **Redeploy.** As tabelas são criadas no primeiro acesso.
+2. Em **Settings → Environment Variables**, adicione:
+   - `DATABASE_URL` = a connection string do pooler do Supabase (porta 6543)
+   - `APP_PASSWORD`, `AUTH_SECRET`
+   - (opcional) `OPENAI_API_KEY`, `OPENAI_MODEL`
+3. **Redeploy.** As tabelas são criadas no primeiro acesso.
 
 > ⚠️ O SQLite em arquivo **não funciona** no Vercel (filesystem efêmero/somente-leitura) — por isso o banco é Postgres.
+> Use sempre a string do **pooler (6543)**, não a conexão direta (5432) — o driver já está configurado com `prepare: false` para o pgbouncer.
 
 ## Backup
 
