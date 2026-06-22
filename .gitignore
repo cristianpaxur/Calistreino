@@ -1,0 +1,14 @@
+node_modules
+.next
+out
+*.log
+.DS_Store
+
+# Variáveis de ambiente (senha!) — nunca versionar
+.env
+.env.local
+.env*.local
+
+# Banco de dados local (seus treinos) — não versionar
+data/*.db
+data/*.db-*

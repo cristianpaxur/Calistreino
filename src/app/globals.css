@@ -1,0 +1,53 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+* {
+  -webkit-font-smoothing: antialiased;
+}
+
+html,
+body {
+  background: #141417;
+  color: #f4f4f0;
+}
+
+/* fundo "fora do telefone" — gradiente do handoff */
+body {
+  background: radial-gradient(120% 120% at 50% 0%, #2a2a30 0%, #1a1a1e 60%, #141417 100%);
+}
+
+/* esconde scrollbar */
+::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+* {
+  scrollbar-width: none;
+}
+
+@layer components {
+  .card {
+    @apply rounded-2xl border border-white/[0.07] bg-surface p-4;
+  }
+  .label {
+    @apply font-mono text-[10px] uppercase tracking-[0.18em] text-muted-2;
+  }
+  .input {
+    @apply w-full rounded-xl border border-white/[0.08] bg-bg px-3.5 py-3 text-base text-ink placeholder:text-muted-2 focus:border-accent/60 focus:outline-none;
+  }
+  .btn-lime {
+    @apply inline-flex items-center justify-center gap-2 rounded-2xl bg-accent font-display text-base tracking-wide text-bg transition-transform active:scale-[0.98];
+    box-shadow: 0 0 30px rgba(214, 251, 61, 0.35);
+  }
+  .btn-dark {
+    @apply inline-flex items-center justify-center gap-2 rounded-2xl border border-white/[0.08] bg-white/[0.05] font-display text-base text-muted transition-colors active:scale-[0.98];
+  }
+  .chip-mono {
+    @apply inline-flex items-center font-mono text-[9px] uppercase tracking-[0.1em];
+  }
+}
