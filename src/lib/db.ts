@@ -1,22 +1,45 @@
 import "server-only";
-import { neon } from "@neondatabase/serverless";
+import postgres from "postgres";
 
-// Banco Postgres (Vercel Postgres / Neon). Usa o driver serverless via HTTP,
-// ideal para funções serverless. Defina DATABASE_URL ou POSTGRES_URL.
-//
-// A conexão é lazy (Proxy): importar este módulo nunca conecta nem lança —
-// só o primeiro uso real exige a env, para não quebrar o `next build`.
-type Sql = ReturnType<typeof neon>;
-let real: Sql | null = null;
+// Banco Postgres (funciona com qualquer provedor: Vercel Postgres, Neon,
+// Supabase, etc.). Lê a string de conexão da primeira variável disponível.
+// Prefira as URLs "pooled" (pgbouncer) em serverless.
+const ENV_NAMES = [
+  "DATABASE_URL",
+  "POSTGRES_URL",
+  "POSTGRES_PRISMA_URL",
+  "DATABASE_URL_UNPOOLED",
+  "POSTGRES_URL_NON_POOLING",
+];
+
+function connectionString(): string {
+  for (const n of ENV_NAMES) {
+    const v = process.env[n];
+    if (v && v.trim()) return v.trim();
+  }
+  throw new Error(
+    "Banco não configurado: defina DATABASE_URL (ou POSTGRES_URL) no ambiente com a string de conexão do Postgres."
+  );
+}
+
+type Sql = ReturnType<typeof postgres>;
+
+// Conexão lazy + singleton entre invocações (Proxy): importar o módulo nunca
+// conecta nem lança — só o primeiro uso real exige a env (não quebra o build).
+const globalForDb = globalThis as unknown as { __pg?: Sql };
+let real: Sql | null = globalForDb.__pg ?? null;
+
 function client(): Sql {
   if (!real) {
-    const cs = process.env.DATABASE_URL ?? process.env.POSTGRES_URL;
-    if (!cs) {
-      throw new Error(
-        "Banco não configurado: defina DATABASE_URL (ou POSTGRES_URL) com a string de conexão do Postgres/Neon."
-      );
-    }
-    real = neon(cs);
+    const cs = connectionString();
+    const isLocal = /localhost|127\.0\.0\.1/.test(cs);
+    real = postgres(cs, {
+      ssl: isLocal ? false : "require",
+      prepare: false, // compatível com poolers em modo transaction (pgbouncer)
+      max: 1,
+      idle_timeout: 20,
+    });
+    globalForDb.__pg = real;
   }
   return real;
 }
@@ -80,7 +103,7 @@ export function ensureSchema(): Promise<void> {
 // ---------- Settings ----------
 export async function getSetting(key: string): Promise<string | null> {
   await ensureSchema();
-  const rows = (await sql`SELECT value FROM settings WHERE key = ${key}`) as {
+  const rows = (await sql`SELECT value FROM settings WHERE key = ${key}`) as unknown as {
     value: string;
   }[];
   return rows[0]?.value ?? null;
@@ -127,7 +150,7 @@ export async function insertWorkout(
   const inserted = (await sql`
     INSERT INTO sessions (date, day_code, week, block, elbow_pain, lower_back, notes, created_at)
     VALUES (${s.date}, ${s.day_code}, ${s.week}, ${s.block}, ${s.elbow_pain}, ${s.lower_back}, ${s.notes}, ${s.created_at})
-    RETURNING id`) as { id: number }[];
+    RETURNING id`) as unknown as { id: number }[];
   const id = inserted[0].id;
 
   const valid = entries.filter((e) => e.exercise && e.exercise.trim());
@@ -157,7 +180,7 @@ export async function insertWorkout(
       );
     }
     try {
-      await sql.query(
+      await sql.unsafe(
         `INSERT INTO entries (session_id, exercise, category, is_skill, lever, max_hold_s, sets, reps_or_time, rir, done, notes, position)
          VALUES ${placeholders}`,
         params

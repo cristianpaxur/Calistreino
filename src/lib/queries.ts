@@ -5,12 +5,12 @@ export async function getSessions(limit?: number): Promise<SessionRow[]> {
   const rows = limit
     ? await sql`SELECT * FROM sessions ORDER BY date DESC, id DESC LIMIT ${limit}`
     : await sql`SELECT * FROM sessions ORDER BY date DESC, id DESC`;
-  return rows as SessionRow[];
+  return rows as unknown as SessionRow[];
 }
 
 export async function getSession(id: number): Promise<SessionRow | undefined> {
   await ensureSchema();
-  const rows = (await sql`SELECT * FROM sessions WHERE id = ${id}`) as SessionRow[];
+  const rows = (await sql`SELECT * FROM sessions WHERE id = ${id}`) as unknown as SessionRow[];
   return rows[0];
 }
 
@@ -18,7 +18,7 @@ export async function getEntries(sessionId: number): Promise<EntryRow[]> {
   await ensureSchema();
   const rows =
     await sql`SELECT * FROM entries WHERE session_id = ${sessionId} ORDER BY position, id`;
-  return rows as EntryRow[];
+  return rows as unknown as EntryRow[];
 }
 
 export interface SessionWithCount extends SessionRow {
@@ -38,9 +38,9 @@ export async function getSessionsWithSummary(
     FROM sessions s
     ORDER BY s.date DESC, s.id DESC`;
   const rows = limit
-    ? await sql.query(base + ` LIMIT $1`, [limit])
-    : await sql.query(base);
-  return rows as SessionWithCount[];
+    ? await sql.unsafe(base + ` LIMIT $1`, [limit])
+    : await sql.unsafe(base);
+  return rows as unknown as SessionWithCount[];
 }
 
 export interface SkillPoint {
@@ -66,7 +66,7 @@ export async function getSkillProgress(
      WHERE e.is_skill = 1 AND e.max_hold_s IS NOT NULL
        AND (lower(e.exercise) LIKE ${like} OR e.lever LIKE ${fallback} OR e.exercise LIKE ${third})
      ORDER BY s.date ASC, s.id ASC`;
-  return rows as SkillPoint[];
+  return rows as unknown as SkillPoint[];
 }
 
 export interface PainPoint {
@@ -82,7 +82,7 @@ export async function getPainHistory(): Promise<PainPoint[]> {
     SELECT date, elbow_pain, lower_back, day_code FROM sessions
      WHERE elbow_pain IS NOT NULL OR lower_back IS NOT NULL
      ORDER BY date ASC, id ASC`;
-  return rows as PainPoint[];
+  return rows as unknown as PainPoint[];
 }
 
 export interface Stats {
@@ -95,24 +95,24 @@ export interface Stats {
 
 export async function getStats(): Promise<Stats> {
   await ensureSchema();
-  const totalRows = (await sql`SELECT COUNT(*)::int AS c FROM sessions`) as {
+  const totalRows = (await sql`SELECT COUNT(*)::int AS c FROM sessions`) as unknown as {
     c: number;
   }[];
   const total = totalRows[0].c;
 
-  const lastRows = (await sql`SELECT date FROM sessions ORDER BY date DESC, id DESC LIMIT 1`) as {
+  const lastRows = (await sql`SELECT date FROM sessions ORDER BY date DESC, id DESC LIMIT 1`) as unknown as {
     date: string;
   }[];
 
   const sevenDaysAgo = new Date();
   sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
   const iso = sevenDaysAgo.toISOString().slice(0, 10);
-  const weekRows = (await sql`SELECT COUNT(*)::int AS c FROM sessions WHERE date >= ${iso}`) as {
+  const weekRows = (await sql`SELECT COUNT(*)::int AS c FROM sessions WHERE date >= ${iso}`) as unknown as {
     c: number;
   }[];
   const thisWeek = weekRows[0].c;
 
-  const dateRows = (await sql`SELECT DISTINCT date FROM sessions ORDER BY date DESC`) as {
+  const dateRows = (await sql`SELECT DISTINCT date FROM sessions ORDER BY date DESC`) as unknown as {
     date: string;
   }[];
   const dates = dateRows.map((r) => r.date);
@@ -164,12 +164,12 @@ export async function getCurrentLevers(): Promise<{
     SELECT e.lever FROM entries e JOIN sessions s ON s.id = e.session_id
      WHERE e.is_skill = 1 AND e.lever IS NOT NULL
        AND (lower(e.exercise) LIKE '%front%' OR e.exercise LIKE '%FL%' OR e.lever LIKE '%FL%')
-     ORDER BY s.date DESC, s.id DESC LIMIT 1`) as { lever: string }[];
+     ORDER BY s.date DESC, s.id DESC LIMIT 1`) as unknown as { lever: string }[];
   const plancheRows = (await sql`
     SELECT e.lever FROM entries e JOIN sessions s ON s.id = e.session_id
      WHERE e.is_skill = 1 AND e.lever IS NOT NULL
        AND (lower(e.exercise) LIKE '%planche%' OR e.lever LIKE '%lanche%')
-     ORDER BY s.date DESC, s.id DESC LIMIT 1`) as { lever: string }[];
+     ORDER BY s.date DESC, s.id DESC LIMIT 1`) as unknown as { lever: string }[];
   return {
     front: frontRows[0]?.lever ?? null,
     planche: plancheRows[0]?.lever ?? null,
@@ -201,12 +201,12 @@ export async function getBestHolds(): Promise<{
   await ensureSchema();
   const f = (await sql`
     SELECT MAX(e.max_hold_s) AS m FROM entries e
-     WHERE e.is_skill = 1 AND (lower(e.exercise) LIKE '%front%' OR e.exercise LIKE '%FL%' OR e.lever LIKE '%FL%')`) as {
+     WHERE e.is_skill = 1 AND (lower(e.exercise) LIKE '%front%' OR e.exercise LIKE '%FL%' OR e.lever LIKE '%FL%')`) as unknown as {
     m: number | null;
   }[];
   const p = (await sql`
     SELECT MAX(e.max_hold_s) AS m FROM entries e
-     WHERE e.is_skill = 1 AND (lower(e.exercise) LIKE '%planche%' OR e.lever LIKE '%lanche%')`) as {
+     WHERE e.is_skill = 1 AND (lower(e.exercise) LIKE '%planche%' OR e.lever LIKE '%lanche%')`) as unknown as {
     m: number | null;
   }[];
   return { front: f[0]?.m ?? null, planche: p[0]?.m ?? null };
