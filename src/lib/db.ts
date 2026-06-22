@@ -1,77 +1,178 @@
-import Database from "better-sqlite3";
-import path from "node:path";
-import fs from "node:fs";
+import "server-only";
+import { neon } from "@neondatabase/serverless";
 
-// Banco de dados local em ./data/calistreino.db
-const dataDir = path.join(process.cwd(), "data");
-if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
-
-const dbPath = path.join(dataDir, "calistreino.db");
-
-// Singleton entre hot-reloads do Next em dev
-const globalForDb = globalThis as unknown as { __db?: Database.Database };
-
-function init(): Database.Database {
-  const db = new Database(dbPath);
-  db.pragma("journal_mode = WAL");
-  db.pragma("foreign_keys = ON");
-
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS sessions (
-      id            INTEGER PRIMARY KEY AUTOINCREMENT,
-      date          TEXT NOT NULL,
-      day_code      TEXT NOT NULL,
-      week          INTEGER,
-      block         TEXT,
-      elbow_pain    INTEGER,
-      lower_back    INTEGER,
-      notes         TEXT,
-      created_at    TEXT NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS entries (
-      id            INTEGER PRIMARY KEY AUTOINCREMENT,
-      session_id    INTEGER NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-      exercise      TEXT NOT NULL,
-      category      TEXT,
-      is_skill      INTEGER DEFAULT 0,
-      lever         TEXT,
-      max_hold_s    REAL,
-      sets          INTEGER,
-      reps_or_time  TEXT,
-      rir           TEXT,
-      done          INTEGER DEFAULT 1,
-      notes         TEXT,
-      position      INTEGER DEFAULT 0
-    );
-
-    CREATE TABLE IF NOT EXISTS settings (
-      key   TEXT PRIMARY KEY,
-      value TEXT
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_entries_session ON entries(session_id);
-    CREATE INDEX IF NOT EXISTS idx_sessions_date ON sessions(date);
-  `);
-
-  return db;
+// Banco Postgres (Vercel Postgres / Neon). Usa o driver serverless via HTTP,
+// ideal para funções serverless. Defina DATABASE_URL ou POSTGRES_URL.
+//
+// A conexão é lazy (Proxy): importar este módulo nunca conecta nem lança —
+// só o primeiro uso real exige a env, para não quebrar o `next build`.
+type Sql = ReturnType<typeof neon>;
+let real: Sql | null = null;
+function client(): Sql {
+  if (!real) {
+    const cs = process.env.DATABASE_URL ?? process.env.POSTGRES_URL;
+    if (!cs) {
+      throw new Error(
+        "Banco não configurado: defina DATABASE_URL (ou POSTGRES_URL) com a string de conexão do Postgres/Neon."
+      );
+    }
+    real = neon(cs);
+  }
+  return real;
 }
 
-export const db: Database.Database = globalForDb.__db ?? init();
-if (process.env.NODE_ENV !== "production") globalForDb.__db = db;
+export const sql = new Proxy(function () {} as unknown as Sql, {
+  apply(_t, _this, args: unknown[]) {
+    return (client() as unknown as (...a: unknown[]) => unknown)(...args);
+  },
+  get(_t, prop: string) {
+    const r = client() as unknown as Record<string, unknown>;
+    const v = r[prop];
+    return typeof v === "function" ? v.bind(r) : v;
+  },
+}) as Sql;
+
+// ---------- Schema (idempotente, memoizado por instância) ----------
+let schemaReady: Promise<void> | null = null;
+export function ensureSchema(): Promise<void> {
+  if (!schemaReady) {
+    schemaReady = (async () => {
+      await sql`CREATE TABLE IF NOT EXISTS sessions (
+        id          SERIAL PRIMARY KEY,
+        date        TEXT NOT NULL,
+        day_code    TEXT NOT NULL,
+        week        INTEGER,
+        block       TEXT,
+        elbow_pain  INTEGER,
+        lower_back  INTEGER,
+        notes       TEXT,
+        created_at  TEXT NOT NULL
+      )`;
+      await sql`CREATE TABLE IF NOT EXISTS entries (
+        id            SERIAL PRIMARY KEY,
+        session_id    INTEGER NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+        exercise      TEXT NOT NULL,
+        category      TEXT,
+        is_skill      INTEGER DEFAULT 0,
+        lever         TEXT,
+        max_hold_s    REAL,
+        sets          INTEGER,
+        reps_or_time  TEXT,
+        rir           TEXT,
+        done          INTEGER DEFAULT 1,
+        notes         TEXT,
+        position      INTEGER DEFAULT 0
+      )`;
+      await sql`CREATE TABLE IF NOT EXISTS settings (
+        key   TEXT PRIMARY KEY,
+        value TEXT
+      )`;
+      await sql`CREATE INDEX IF NOT EXISTS idx_entries_session ON entries(session_id)`;
+      await sql`CREATE INDEX IF NOT EXISTS idx_sessions_date ON sessions(date)`;
+    })().catch((e) => {
+      schemaReady = null; // permite nova tentativa no próximo cold start
+      throw e;
+    });
+  }
+  return schemaReady;
+}
 
 // ---------- Settings ----------
-export function getSetting(key: string): string | null {
-  const row = db.prepare("SELECT value FROM settings WHERE key = ?").get(key) as
-    | { value: string }
-    | undefined;
-  return row?.value ?? null;
+export async function getSetting(key: string): Promise<string | null> {
+  await ensureSchema();
+  const rows = (await sql`SELECT value FROM settings WHERE key = ${key}`) as {
+    value: string;
+  }[];
+  return rows[0]?.value ?? null;
 }
 
-export function setSetting(key: string, value: string): void {
-  db.prepare(
-    "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
-  ).run(key, value);
+export async function setSetting(key: string, value: string): Promise<void> {
+  await ensureSchema();
+  await sql`INSERT INTO settings (key, value) VALUES (${key}, ${value})
+            ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`;
+}
+
+// ---------- Escrita de treino ----------
+export interface SessionInsert {
+  date: string;
+  day_code: string;
+  week: number | null;
+  block: string | null;
+  elbow_pain: number | null;
+  lower_back: number | null;
+  notes: string | null;
+  created_at: string;
+}
+
+export interface EntryInsert {
+  exercise: string;
+  category: string | null;
+  is_skill: number;
+  lever: string | null;
+  max_hold_s: number | null;
+  sets: number | null;
+  reps_or_time: string | null;
+  rir: string | null;
+  done: number;
+  notes: string | null;
+  position: number;
+}
+
+/** Insere a sessão e suas entradas. Se as entradas falharem, remove a sessão. */
+export async function insertWorkout(
+  s: SessionInsert,
+  entries: EntryInsert[]
+): Promise<number> {
+  await ensureSchema();
+  const inserted = (await sql`
+    INSERT INTO sessions (date, day_code, week, block, elbow_pain, lower_back, notes, created_at)
+    VALUES (${s.date}, ${s.day_code}, ${s.week}, ${s.block}, ${s.elbow_pain}, ${s.lower_back}, ${s.notes}, ${s.created_at})
+    RETURNING id`) as { id: number }[];
+  const id = inserted[0].id;
+
+  const valid = entries.filter((e) => e.exercise && e.exercise.trim());
+  if (valid.length) {
+    const COLS = 12;
+    const placeholders = valid
+      .map(
+        (_, r) =>
+          `(${Array.from({ length: COLS }, (_, c) => `$${r * COLS + c + 1}`).join(",")})`
+      )
+      .join(",");
+    const params: (string | number | null)[] = [];
+    for (const e of valid) {
+      params.push(
+        id,
+        e.exercise.trim(),
+        e.category,
+        e.is_skill,
+        e.lever,
+        e.max_hold_s,
+        e.sets,
+        e.reps_or_time,
+        e.rir,
+        e.done,
+        e.notes,
+        e.position
+      );
+    }
+    try {
+      await sql.query(
+        `INSERT INTO entries (session_id, exercise, category, is_skill, lever, max_hold_s, sets, reps_or_time, rir, done, notes, position)
+         VALUES ${placeholders}`,
+        params
+      );
+    } catch (err) {
+      await sql`DELETE FROM sessions WHERE id = ${id}`;
+      throw err;
+    }
+  }
+  return id;
+}
+
+export async function removeSession(id: number): Promise<void> {
+  await ensureSchema();
+  await sql`DELETE FROM sessions WHERE id = ${id}`;
 }
 
 // ---------- Tipos ----------

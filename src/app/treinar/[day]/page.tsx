@@ -22,10 +22,12 @@ export default async function DayPage({
   const day = dayByCode(code.toUpperCase());
   if (!day) notFound();
 
-  const cycleStart = getSetting("cycle_start");
+  const [cycleStart, levers] = await Promise.all([
+    getSetting("cycle_start"),
+    getCurrentLevers(),
+  ]);
   const week = weekFromStart(cycleStart);
   const block = blockForWeek(week);
-  const levers = getCurrentLevers();
   const today = new Date().toISOString().slice(0, 10);
 
   if (modo === "manual") {

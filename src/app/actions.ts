@@ -1,6 +1,12 @@
 "use server";
 
-import { db, setSetting } from "@/lib/db";
+import {
+  setSetting,
+  insertWorkout,
+  removeSession,
+  type SessionInsert,
+  type EntryInsert,
+} from "@/lib/db";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 
@@ -16,17 +22,26 @@ function str(v: FormDataEntryValue | null): string | null {
   return s === "" ? null : s;
 }
 
-export async function saveSession(formData: FormData) {
-  const date = str(formData.get("date")) ?? new Date().toISOString().slice(0, 10);
-  const dayCode = str(formData.get("day_code")) ?? "D1";
-  const week = num(formData.get("week"));
-  const block = str(formData.get("block"));
-  const elbow = num(formData.get("elbow_pain"));
-  const lowerBack = num(formData.get("lower_back"));
-  const notes = str(formData.get("notes"));
-  const now = new Date().toISOString();
+function revalidateAll() {
+  revalidatePath("/");
+  revalidatePath("/historico");
+  revalidatePath("/progressao");
+  revalidatePath("/coach");
+}
 
-  // Entradas chegam como arrays indexados: ex_name[], lever[], etc.
+export async function saveSession(formData: FormData) {
+  const session: SessionInsert = {
+    date: str(formData.get("date")) ?? new Date().toISOString().slice(0, 10),
+    day_code: str(formData.get("day_code")) ?? "D1",
+    week: num(formData.get("week")),
+    block: str(formData.get("block")),
+    elbow_pain: num(formData.get("elbow_pain")),
+    lower_back: num(formData.get("lower_back")),
+    notes: str(formData.get("notes")),
+    created_at: new Date().toISOString(),
+  };
+
+  // Entradas chegam como arrays indexados: ex_name[], ex_lever[], etc.
   const names = formData.getAll("ex_name").map(String);
   const cats = formData.getAll("ex_category").map(String);
   const isSkills = formData.getAll("ex_is_skill").map(String);
@@ -38,56 +53,34 @@ export async function saveSession(formData: FormData) {
   const dones = formData.getAll("ex_done").map(String);
   const exNotes = formData.getAll("ex_notes").map(String);
 
-  const tx = db.transaction(() => {
-    const info = db
-      .prepare(
-        `INSERT INTO sessions (date, day_code, week, block, elbow_pain, lower_back, notes, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-      )
-      .run(date, dayCode, week, block, elbow, lowerBack, notes, now);
-    const sessionId = Number(info.lastInsertRowid);
+  const entries: EntryInsert[] = [];
+  for (let i = 0; i < names.length; i++) {
+    const name = names[i]?.trim();
+    if (!name) continue;
+    entries.push({
+      exercise: name,
+      category: cats[i] ?? null,
+      is_skill: isSkills[i] === "1" ? 1 : 0,
+      lever: levers[i]?.trim() || null,
+      max_hold_s: maxHolds[i] ? Number(maxHolds[i]) : null,
+      sets: sets[i] ? Number(sets[i]) : null,
+      reps_or_time: repsTime[i]?.trim() || null,
+      rir: rirs[i]?.trim() || null,
+      done: dones[i] === "0" ? 0 : 1,
+      notes: exNotes[i]?.trim() || null,
+      position: i,
+    });
+  }
 
-    const stmt = db.prepare(
-      `INSERT INTO entries
-        (session_id, exercise, category, is_skill, lever, max_hold_s, sets, reps_or_time, rir, done, notes, position)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    );
-    for (let i = 0; i < names.length; i++) {
-      const name = names[i]?.trim();
-      if (!name) continue;
-      stmt.run(
-        sessionId,
-        name,
-        cats[i] ?? null,
-        isSkills[i] === "1" ? 1 : 0,
-        levers[i]?.trim() || null,
-        maxHolds[i] ? Number(maxHolds[i]) : null,
-        sets[i] ? Number(sets[i]) : null,
-        repsTime[i]?.trim() || null,
-        rirs[i]?.trim() || null,
-        dones[i] === "0" ? 0 : 1,
-        exNotes[i]?.trim() || null,
-        i
-      );
-    }
-    return sessionId;
-  });
-
-  const sessionId = tx();
-  revalidatePath("/");
-  revalidatePath("/historico");
-  revalidatePath("/progressao");
+  const sessionId = await insertWorkout(session, entries);
+  revalidateAll();
   redirect(`/historico/${sessionId}`);
 }
 
 export async function deleteSession(formData: FormData) {
   const id = num(formData.get("id"));
-  if (id !== null) {
-    db.prepare("DELETE FROM sessions WHERE id = ?").run(id);
-  }
-  revalidatePath("/");
-  revalidatePath("/historico");
-  revalidatePath("/progressao");
+  if (id !== null) await removeSession(id);
+  revalidateAll();
   redirect("/historico");
 }
 
@@ -117,53 +110,34 @@ export interface WorkoutInput {
 }
 
 export async function saveWorkout(data: WorkoutInput): Promise<{ id: number }> {
-  const now = new Date().toISOString();
-  const tx = db.transaction(() => {
-    const info = db
-      .prepare(
-        `INSERT INTO sessions (date, day_code, week, block, elbow_pain, lower_back, notes, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-      )
-      .run(
-        data.date,
-        data.dayCode,
-        data.week ?? null,
-        data.block ?? null,
-        data.elbowPain ?? null,
-        data.lowerBack ?? null,
-        data.notes ?? null,
-        now
-      );
-    const sessionId = Number(info.lastInsertRowid);
-    const stmt = db.prepare(
-      `INSERT INTO entries
-        (session_id, exercise, category, is_skill, lever, max_hold_s, sets, reps_or_time, rir, done, notes, position)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    );
-    data.entries.forEach((e, i) => {
-      if (!e.exercise?.trim()) return;
-      stmt.run(
-        sessionId,
-        e.exercise.trim(),
-        e.category ?? null,
-        e.isSkill ? 1 : 0,
-        e.lever?.trim() || null,
-        e.maxHold ?? null,
-        e.sets ?? null,
-        e.repsOrTime?.trim() || null,
-        e.rir?.trim() || null,
-        e.done === false ? 0 : 1,
-        e.notes?.trim() || null,
-        i
-      );
-    });
-    return sessionId;
-  });
-  const id = tx();
-  revalidatePath("/");
-  revalidatePath("/historico");
-  revalidatePath("/progressao");
-  revalidatePath("/coach");
+  const session: SessionInsert = {
+    date: data.date,
+    day_code: data.dayCode,
+    week: data.week ?? null,
+    block: data.block ?? null,
+    elbow_pain: data.elbowPain ?? null,
+    lower_back: data.lowerBack ?? null,
+    notes: data.notes ?? null,
+    created_at: new Date().toISOString(),
+  };
+  const entries: EntryInsert[] = data.entries
+    .filter((e) => e.exercise?.trim())
+    .map((e, i) => ({
+      exercise: e.exercise.trim(),
+      category: e.category ?? null,
+      is_skill: e.isSkill ? 1 : 0,
+      lever: e.lever?.trim() || null,
+      max_hold_s: e.maxHold ?? null,
+      sets: e.sets ?? null,
+      reps_or_time: e.repsOrTime?.trim() || null,
+      rir: e.rir?.trim() || null,
+      done: e.done === false ? 0 : 1,
+      notes: e.notes?.trim() || null,
+      position: i,
+    }));
+
+  const id = await insertWorkout(session, entries);
+  revalidateAll();
   return { id };
 }
 
@@ -177,8 +151,8 @@ export async function runAiCoach(): Promise<
   const { getSetting } = await import("@/lib/db");
   const { weekFromStart, blockForWeek } = await import("@/lib/cycle");
 
-  const data = getCoachData();
-  const week = weekFromStart(getSetting("cycle_start"));
+  const data = await getCoachData();
+  const week = weekFromStart(await getSetting("cycle_start"));
   const block = blockForWeek(week);
   const report = buildReport({ ...data, block });
   return analyzeWithAI(data, report);
@@ -186,7 +160,7 @@ export async function runAiCoach(): Promise<
 
 export async function saveSettings(formData: FormData) {
   const start = str(formData.get("cycle_start"));
-  if (start) setSetting("cycle_start", start);
+  if (start) await setSetting("cycle_start", start);
   revalidatePath("/");
   redirect("/");
 }

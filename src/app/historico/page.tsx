@@ -17,9 +17,11 @@ function isoLocal(d: Date) {
   ).padStart(2, "0")}`;
 }
 
-export default function HistoricoPage() {
-  const sessions = getSessionsWithSummary();
-  const stats = getStats();
+export default async function HistoricoPage() {
+  const [sessions, stats] = await Promise.all([
+    getSessionsWithSummary(),
+    getStats(),
+  ]);
 
   // heatmap — 12 semanas × 7 dias terminando hoje
   const counts = new Map<string, number>();

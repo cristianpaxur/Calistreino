@@ -17,8 +17,8 @@ function currentWeeks(cw: number): string {
   return found?.weeks ?? "";
 }
 
-export default function PlanoPage() {
-  const week = weekFromStart(getSetting("cycle_start"));
+export default async function PlanoPage() {
+  const week = weekFromStart(await getSetting("cycle_start"));
   const cw = cycleWeek(week);
   const curWeeks = currentWeeks(cw);
 

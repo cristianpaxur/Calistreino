@@ -1,22 +1,24 @@
-import { db, EntryRow, SessionRow } from "./db";
+import { sql, ensureSchema, EntryRow, SessionRow } from "./db";
 
-export function getSessions(limit?: number): SessionRow[] {
-  const sql = `SELECT * FROM sessions ORDER BY date DESC, id DESC ${
-    limit ? "LIMIT " + Number(limit) : ""
-  }`;
-  return db.prepare(sql).all() as SessionRow[];
+export async function getSessions(limit?: number): Promise<SessionRow[]> {
+  await ensureSchema();
+  const rows = limit
+    ? await sql`SELECT * FROM sessions ORDER BY date DESC, id DESC LIMIT ${limit}`
+    : await sql`SELECT * FROM sessions ORDER BY date DESC, id DESC`;
+  return rows as SessionRow[];
 }
 
-export function getSession(id: number): SessionRow | undefined {
-  return db.prepare("SELECT * FROM sessions WHERE id = ?").get(id) as
-    | SessionRow
-    | undefined;
+export async function getSession(id: number): Promise<SessionRow | undefined> {
+  await ensureSchema();
+  const rows = (await sql`SELECT * FROM sessions WHERE id = ${id}`) as SessionRow[];
+  return rows[0];
 }
 
-export function getEntries(sessionId: number): EntryRow[] {
-  return db
-    .prepare("SELECT * FROM entries WHERE session_id = ? ORDER BY position, id")
-    .all(sessionId) as EntryRow[];
+export async function getEntries(sessionId: number): Promise<EntryRow[]> {
+  await ensureSchema();
+  const rows =
+    await sql`SELECT * FROM entries WHERE session_id = ${sessionId} ORDER BY position, id`;
+  return rows as EntryRow[];
 }
 
 export interface SessionWithCount extends SessionRow {
@@ -24,17 +26,21 @@ export interface SessionWithCount extends SessionRow {
   skill_summary: string | null;
 }
 
-export function getSessionsWithSummary(limit?: number): SessionWithCount[] {
-  const sql = `
+export async function getSessionsWithSummary(
+  limit?: number
+): Promise<SessionWithCount[]> {
+  await ensureSchema();
+  const base = `
     SELECT s.*,
-      (SELECT COUNT(*) FROM entries e WHERE e.session_id = s.id) AS entry_count,
-      (SELECT group_concat(e.lever || ' ' || COALESCE(e.max_hold_s,'') || 's', ' · ')
+      (SELECT COUNT(*)::int FROM entries e WHERE e.session_id = s.id) AS entry_count,
+      (SELECT string_agg(e.lever || ' ' || COALESCE(e.max_hold_s::text,'') || 's', ' · ')
          FROM entries e WHERE e.session_id = s.id AND e.is_skill = 1 AND e.lever IS NOT NULL) AS skill_summary
     FROM sessions s
-    ORDER BY s.date DESC, s.id DESC
-    ${limit ? "LIMIT " + Number(limit) : ""}
-  `;
-  return db.prepare(sql).all() as SessionWithCount[];
+    ORDER BY s.date DESC, s.id DESC`;
+  const rows = limit
+    ? await sql.query(base + ` LIMIT $1`, [limit])
+    : await sql.query(base);
+  return rows as SessionWithCount[];
 }
 
 export interface SkillPoint {
@@ -46,23 +52,21 @@ export interface SkillPoint {
 }
 
 /** Histórico de max-hold por padrão de skill (FL ou Planche) para gráficos. */
-export function getSkillProgress(pattern: "front" | "planche"): SkillPoint[] {
-  const like =
-    pattern === "front"
-      ? "%front%"
-      : "%planche%";
-  // Casa pelo nome do exercício OU pela alavanca digitada (ex.: "FL straddle").
+export async function getSkillProgress(
+  pattern: "front" | "planche"
+): Promise<SkillPoint[]> {
+  await ensureSchema();
+  const like = pattern === "front" ? "%front%" : "%planche%";
   const fallback = pattern === "front" ? "%FL%" : "%planche%";
-  return db
-    .prepare(
-      `SELECT s.date AS date, e.max_hold_s AS max_hold_s, e.lever AS lever,
-              e.exercise AS exercise, s.id AS session_id
-         FROM entries e JOIN sessions s ON s.id = e.session_id
-        WHERE e.is_skill = 1 AND e.max_hold_s IS NOT NULL
-          AND (lower(e.exercise) LIKE ? OR e.lever LIKE ? OR e.exercise LIKE ?)
-        ORDER BY s.date ASC, s.id ASC`
-    )
-    .all(like, fallback, pattern === "front" ? "%FL%" : "%Planche%") as SkillPoint[];
+  const third = pattern === "front" ? "%FL%" : "%Planche%";
+  const rows = await sql`
+    SELECT s.date AS date, e.max_hold_s AS max_hold_s, e.lever AS lever,
+           e.exercise AS exercise, s.id AS session_id
+      FROM entries e JOIN sessions s ON s.id = e.session_id
+     WHERE e.is_skill = 1 AND e.max_hold_s IS NOT NULL
+       AND (lower(e.exercise) LIKE ${like} OR e.lever LIKE ${fallback} OR e.exercise LIKE ${third})
+     ORDER BY s.date ASC, s.id ASC`;
+  return rows as SkillPoint[];
 }
 
 export interface PainPoint {
@@ -72,14 +76,13 @@ export interface PainPoint {
   day_code: string;
 }
 
-export function getPainHistory(): PainPoint[] {
-  return db
-    .prepare(
-      `SELECT date, elbow_pain, lower_back, day_code FROM sessions
-        WHERE elbow_pain IS NOT NULL OR lower_back IS NOT NULL
-        ORDER BY date ASC, id ASC`
-    )
-    .all() as PainPoint[];
+export async function getPainHistory(): Promise<PainPoint[]> {
+  await ensureSchema();
+  const rows = await sql`
+    SELECT date, elbow_pain, lower_back, day_code FROM sessions
+     WHERE elbow_pain IS NOT NULL OR lower_back IS NOT NULL
+     ORDER BY date ASC, id ASC`;
+  return rows as PainPoint[];
 }
 
 export interface Stats {
@@ -90,31 +93,34 @@ export interface Stats {
   lastDate: string | null;
 }
 
-export function getStats(): Stats {
-  const total = (db.prepare("SELECT COUNT(*) c FROM sessions").get() as { c: number }).c;
-  const last = db
-    .prepare("SELECT date FROM sessions ORDER BY date DESC, id DESC LIMIT 1")
-    .get() as { date: string } | undefined;
+export async function getStats(): Promise<Stats> {
+  await ensureSchema();
+  const totalRows = (await sql`SELECT COUNT(*)::int AS c FROM sessions`) as {
+    c: number;
+  }[];
+  const total = totalRows[0].c;
+
+  const lastRows = (await sql`SELECT date FROM sessions ORDER BY date DESC, id DESC LIMIT 1`) as {
+    date: string;
+  }[];
+
   const sevenDaysAgo = new Date();
   sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
   const iso = sevenDaysAgo.toISOString().slice(0, 10);
-  const thisWeek = (
-    db.prepare("SELECT COUNT(*) c FROM sessions WHERE date >= ?").get(iso) as {
-      c: number;
-    }
-  ).c;
+  const weekRows = (await sql`SELECT COUNT(*)::int AS c FROM sessions WHERE date >= ${iso}`) as {
+    c: number;
+  }[];
+  const thisWeek = weekRows[0].c;
 
-  // streak de dias distintos com treino, terminando hoje ou ontem
-  const dates = (
-    db.prepare("SELECT DISTINCT date FROM sessions ORDER BY date DESC").all() as {
-      date: string;
-    }[]
-  ).map((r) => r.date);
+  const dateRows = (await sql`SELECT DISTINCT date FROM sessions ORDER BY date DESC`) as {
+    date: string;
+  }[];
+  const dates = dateRows.map((r) => r.date);
+
   let streak = 0;
   const cursor = new Date();
   cursor.setHours(0, 0, 0, 0);
   const set = new Set(dates);
-  // permite começar contagem a partir de hoje ou ontem
   if (!set.has(cursor.toISOString().slice(0, 10))) {
     cursor.setDate(cursor.getDate() - 1);
   }
@@ -123,7 +129,6 @@ export function getStats(): Stats {
     cursor.setDate(cursor.getDate() - 1);
   }
 
-  // melhor sequência (dias consecutivos distintos)
   const sorted = [...dates].sort();
   let best = 0;
   let run = 0;
@@ -145,29 +150,30 @@ export function getStats(): Stats {
     thisWeek,
     streakDays: streak,
     bestStreak: Math.max(best, streak),
-    lastDate: last?.date ?? null,
+    lastDate: lastRows[0]?.date ?? null,
   };
 }
 
-/** Última alavanca registrada para FL e Planche (para sugerir no dashboard). */
-export function getCurrentLevers(): { front: string | null; planche: string | null } {
-  const front = db
-    .prepare(
-      `SELECT e.lever FROM entries e JOIN sessions s ON s.id = e.session_id
-        WHERE e.is_skill = 1 AND e.lever IS NOT NULL
-          AND (lower(e.exercise) LIKE '%front%' OR e.exercise LIKE '%FL%' OR e.lever LIKE '%FL%')
-        ORDER BY s.date DESC, s.id DESC LIMIT 1`
-    )
-    .get() as { lever: string } | undefined;
-  const planche = db
-    .prepare(
-      `SELECT e.lever FROM entries e JOIN sessions s ON s.id = e.session_id
-        WHERE e.is_skill = 1 AND e.lever IS NOT NULL
-          AND (lower(e.exercise) LIKE '%planche%' OR e.lever LIKE '%lanche%')
-        ORDER BY s.date DESC, s.id DESC LIMIT 1`
-    )
-    .get() as { lever: string } | undefined;
-  return { front: front?.lever ?? null, planche: planche?.lever ?? null };
+/** Última alavanca registrada para FL e Planche. */
+export async function getCurrentLevers(): Promise<{
+  front: string | null;
+  planche: string | null;
+}> {
+  await ensureSchema();
+  const frontRows = (await sql`
+    SELECT e.lever FROM entries e JOIN sessions s ON s.id = e.session_id
+     WHERE e.is_skill = 1 AND e.lever IS NOT NULL
+       AND (lower(e.exercise) LIKE '%front%' OR e.exercise LIKE '%FL%' OR e.lever LIKE '%FL%')
+     ORDER BY s.date DESC, s.id DESC LIMIT 1`) as { lever: string }[];
+  const plancheRows = (await sql`
+    SELECT e.lever FROM entries e JOIN sessions s ON s.id = e.session_id
+     WHERE e.is_skill = 1 AND e.lever IS NOT NULL
+       AND (lower(e.exercise) LIKE '%planche%' OR e.lever LIKE '%lanche%')
+     ORDER BY s.date DESC, s.id DESC LIMIT 1`) as { lever: string }[];
+  return {
+    front: frontRows[0]?.lever ?? null,
+    planche: plancheRows[0]?.lever ?? null,
+  };
 }
 
 export interface CoachData {
@@ -177,28 +183,31 @@ export interface CoachData {
   recentSessions: SessionRow[];
 }
 
-export function getCoachData(): CoachData {
-  return {
-    front: getSkillProgress("front"),
-    planche: getSkillProgress("planche"),
-    pain: getPainHistory(),
-    recentSessions: getSessions(8),
-  };
+export async function getCoachData(): Promise<CoachData> {
+  const [front, planche, pain, recentSessions] = await Promise.all([
+    getSkillProgress("front"),
+    getSkillProgress("planche"),
+    getPainHistory(),
+    getSessions(8),
+  ]);
+  return { front, planche, pain, recentSessions };
 }
 
 /** Melhor (maior) max-hold por skill. */
-export function getBestHolds(): { front: number | null; planche: number | null } {
-  const f = db
-    .prepare(
-      `SELECT MAX(e.max_hold_s) m FROM entries e
-        WHERE e.is_skill = 1 AND (lower(e.exercise) LIKE '%front%' OR e.exercise LIKE '%FL%' OR e.lever LIKE '%FL%')`
-    )
-    .get() as { m: number | null };
-  const p = db
-    .prepare(
-      `SELECT MAX(e.max_hold_s) m FROM entries e
-        WHERE e.is_skill = 1 AND (lower(e.exercise) LIKE '%planche%' OR e.lever LIKE '%lanche%')`
-    )
-    .get() as { m: number | null };
-  return { front: f.m, planche: p.m };
+export async function getBestHolds(): Promise<{
+  front: number | null;
+  planche: number | null;
+}> {
+  await ensureSchema();
+  const f = (await sql`
+    SELECT MAX(e.max_hold_s) AS m FROM entries e
+     WHERE e.is_skill = 1 AND (lower(e.exercise) LIKE '%front%' OR e.exercise LIKE '%FL%' OR e.lever LIKE '%FL%')`) as {
+    m: number | null;
+  }[];
+  const p = (await sql`
+    SELECT MAX(e.max_hold_s) AS m FROM entries e
+     WHERE e.is_skill = 1 AND (lower(e.exercise) LIKE '%planche%' OR e.lever LIKE '%lanche%')`) as {
+    m: number | null;
+  }[];
+  return { front: f[0]?.m ?? null, planche: p[0]?.m ?? null };
 }

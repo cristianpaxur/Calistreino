@@ -15,16 +15,20 @@ const vLabel: Record<Verdict, string> = {
   "sem-dados": "SEM DADOS",
 };
 
-export default function CoachPage() {
-  const data = getCoachData();
-  const stats = getStats();
-  const week = weekFromStart(getSetting("cycle_start"));
+export default async function CoachPage() {
+  const [data, stats, cycleStart, flPoints] = await Promise.all([
+    getCoachData(),
+    getStats(),
+    getSetting("cycle_start"),
+    getSkillProgress("front"),
+  ]);
+  const week = weekFromStart(cycleStart);
   const block = blockForWeek(week);
   const report = buildReport({ ...data, block });
   const ai = getAiConfig();
 
   // FL ganho no histórico
-  const fl = getSkillProgress("front").map((p) => p.max_hold_s);
+  const fl = flPoints.map((p) => p.max_hold_s);
   const flDelta = fl.length >= 2 ? fl[fl.length - 1] - fl[0] : null;
 
   // dor média (cotovelo) das sessões recentes

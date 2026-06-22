@@ -8,8 +8,8 @@ import { PageTitle } from "@/components/ui";
 
 export const dynamic = "force-dynamic";
 
-export default function ConfiguracoesPage() {
-  const cycleStart = getSetting("cycle_start");
+export default async function ConfiguracoesPage() {
+  const cycleStart = await getSetting("cycle_start");
   const week = weekFromStart(cycleStart);
   const { enabled: authEnabled } = getAuthConfig();
 

@@ -42,17 +42,19 @@ function Rungs({ count, idx, color }: { count: number; idx: number; color: strin
   );
 }
 
-export default function Home() {
-  const stats = getStats();
-  const recent = getSessionsWithSummary(1);
-  const levers = getCurrentLevers();
-  const best = getBestHolds();
-  const cycleStart = getSetting("cycle_start");
+export default async function Home() {
+  const [stats, recent, levers, best, cycleStart] = await Promise.all([
+    getStats(),
+    getSessionsWithSummary(1),
+    getCurrentLevers(),
+    getBestHolds(),
+    getSetting("cycle_start"),
+  ]);
   const week = weekFromStart(cycleStart);
   const cw = cycleWeek(week);
   const cn = cycleNumber(week);
   const block = blockForWeek(week);
-  const report = buildReport({ ...getCoachData(), block });
+  const report = buildReport({ ...(await getCoachData()), block });
 
   const suggested = nextDay(recent[0]?.day_code ?? null);
   const suggestedDay = PLAN.find((d) => d.code === suggested)!;

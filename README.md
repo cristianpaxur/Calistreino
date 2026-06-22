@@ -24,24 +24,33 @@ OPENAI_MODEL=gpt-4o-mini
 
 Pegue a chave em https://platform.openai.com/api-keys e reinicie o app.
 
-## Como rodar
+## Banco de dados (Postgres / Neon)
+
+O app usa **Postgres** via driver serverless da Neon (`@neondatabase/serverless`).
+Defina a variável `DATABASE_URL` (ou `POSTGRES_URL`) com a string de conexão.
+As tabelas são criadas automaticamente no primeiro acesso.
+
+## Como rodar (local)
 
 ```bash
 npm install
+# crie um banco grátis na Neon (neon.tech) e cole a string em .env.local:
+# DATABASE_URL=postgresql://...neon.tech/...?sslmode=require
 npm run dev
 ```
 
-Abra http://localhost:3000
+Abra http://localhost:3000 → na primeira vez, vá em **⚙️ Ajustes** e defina a data de início do ciclo.
 
-Na primeira vez, vá em **Configurações** (⚙️) e defina a data de início do ciclo para o app calcular semana/bloco automaticamente.
+## Deploy no Vercel
 
-### Build de produção
+1. Importe o repositório no Vercel.
+2. Em **Storage → Create Database → Postgres (Neon)**, conecte ao projeto.
+   Isso injeta `DATABASE_URL`/`POSTGRES_URL` automaticamente.
+3. Adicione as variáveis: `APP_PASSWORD`, `AUTH_SECRET` e (opcional) `OPENAI_API_KEY`, `OPENAI_MODEL`.
+4. **Redeploy.** As tabelas são criadas no primeiro acesso.
 
-```bash
-npm run build
-npm start
-```
+> ⚠️ O SQLite em arquivo **não funciona** no Vercel (filesystem efêmero/somente-leitura) — por isso o banco é Postgres.
 
 ## Backup
 
-Todo o histórico fica em `data/calistreino.db`. Para fazer backup, basta copiar essa pasta.
+Os dados ficam no Postgres. Faça backup pelo painel da Neon/Vercel (snapshots) ou `pg_dump`.

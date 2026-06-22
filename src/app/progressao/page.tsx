@@ -53,14 +53,19 @@ function Ladder({
   );
 }
 
-export default function ProgressaoPage() {
-  const front = getSkillProgress("front").map((p) => p.max_hold_s);
-  const planche = getSkillProgress("planche").map((p) => p.max_hold_s);
-  const pain = getPainHistory()
+export default async function ProgressaoPage() {
+  const [frontPts, planchePts, painHist, levers] = await Promise.all([
+    getSkillProgress("front"),
+    getSkillProgress("planche"),
+    getPainHistory(),
+    getCurrentLevers(),
+  ]);
+  const front = frontPts.map((p) => p.max_hold_s);
+  const planche = planchePts.map((p) => p.max_hold_s);
+  const pain = painHist
     .map((p) => p.elbow_pain)
     .filter((v): v is number => v !== null)
     .slice(-12);
-  const levers = getCurrentLevers();
 
   const maxV = Math.max(12, ...front, ...planche);
   const flP = points(front, maxV);

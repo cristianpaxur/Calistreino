@@ -13,9 +13,9 @@ export default async function SessionDetail({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const session = getSession(Number(id));
+  const session = await getSession(Number(id));
   if (!session) notFound();
-  const entries = getEntries(session.id);
+  const entries = await getEntries(session.id);
   const day = PLAN.find((d) => d.code === session.day_code);
 
   const dateLabel = new Date(session.date + "T00:00:00").toLocaleDateString("pt-BR", {
