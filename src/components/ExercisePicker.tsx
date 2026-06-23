@@ -3,7 +3,8 @@
 import { useMemo, useState } from "react";
 import { filterOptions, type ExerciseOption } from "@/lib/exercise-catalog";
 import { createCustomExerciseAction } from "@/app/actions";
-import { catOf } from "@/components/ui";
+import { catOf, MovementChip } from "@/components/ui";
+import { movementType } from "@/lib/exercise-classify";
 
 // ExercisePicker (006 / T-001): busca na biblioteca + criar exercício custom.
 // `catalog` chega pré-carregado do server (biblioteca real 005 OU fallback PLAN).
@@ -117,6 +118,13 @@ export default function ExercisePicker({
                     {o.id ? "" : " · livre"}
                   </div>
                 </div>
+                {/* MOV (013): selo estatico/dinamico ao lado da categoria.
+                    ExerciseOption traz `defaultUnit` (sinal mais especifico:
+                    seconds => ESTATICO, reps => DINAMICO); `isSkill` cobre o
+                    fallback caso a unidade venha ausente. */}
+                <MovementChip
+                  type={movementType({ defaultUnit: o.defaultUnit, isSkill: o.isSkill })}
+                />
                 <span
                   className="chip-mono shrink-0 rounded-md px-1.5 py-1"
                   style={{ color: k.color, background: k.bg }}

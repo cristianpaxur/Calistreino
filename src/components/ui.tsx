@@ -40,6 +40,29 @@ export function CategoryChip({ category }: { category: string | null }) {
   );
 }
 
+// MOV: eixo de movimento do exercicio. Estatico = isometria/sustentacao (sem
+// alongar/encurtar o musculo); Dinamico = movimento com amplitude (rep contada).
+// Usamos a mesma estetica do CategoryChip (chip-mono + cor/bg translucido) para
+// que os dois selos convivam visualmente lado a lado no card do exercicio.
+const MOV: Record<"static" | "dynamic", { label: string; color: string; bg: string }> = {
+  // accent/lime do design system (#D6FB3D) — reforca a ideia de "parado/segurando"
+  static: { label: "ESTÁTICO", color: "#D6FB3D", bg: "rgba(214,251,61,0.14)" },
+  // cyan (#7FE7FF) — mesmo tom usado em FORÇA, sugere fluidez/movimento
+  dynamic: { label: "DINÂMICO", color: "#7FE7FF", bg: "rgba(127,231,255,0.12)" },
+};
+
+export function MovementChip({ type }: { type: "static" | "dynamic" }) {
+  const m = MOV[type];
+  return (
+    <span
+      className="chip-mono rounded-md px-1.5 py-1"
+      style={{ color: m.color, background: m.bg }}
+    >
+      {m.label}
+    </span>
+  );
+}
+
 export function PainPill({ value }: { value: number | null }) {
   if (value === null) return null;
   const color = value >= 3 ? "#FF6F66" : value > 0 ? "#FFC14D" : "#D6FB3D";

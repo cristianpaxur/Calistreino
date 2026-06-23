@@ -3,7 +3,8 @@
 import { useState } from "react";
 import Link from "next/link";
 import type { PlanDay } from "@/lib/plan";
-import { catOf } from "@/components/ui";
+import { catOf, MovementChip } from "@/components/ui";
+import { movementType } from "@/lib/exercise-classify";
 
 // Seletor de dia (client) — recebe os dias já adaptados do programa ativo (004).
 export default function TreinarPicker({ days }: { days: PlanDay[] }) {
@@ -77,6 +78,10 @@ export default function TreinarPicker({ days }: { days: PlanDay[] }) {
                 <div className="text-[13px] font-semibold leading-tight">{e.name}</div>
                 <div className="mt-0.5 font-mono text-[10px] text-muted-2">{e.prescription}</div>
               </div>
+              {/* MOV (013): selo do eixo estatico/dinamico ao lado da categoria.
+                  PlanExercise nao carrega unidade-alvo explicita, entao o helper
+                  cai no fallback por `isSkill` (skill isometrico => ESTATICO). */}
+              <MovementChip type={movementType({ isSkill: e.isSkill })} />
               <span
                 className="chip-mono shrink-0 rounded-md px-1.5 py-1"
                 style={{ color: k.color, background: k.bg }}

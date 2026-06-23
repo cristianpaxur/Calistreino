@@ -17,6 +17,13 @@ seguindo **Spec-Driven Development**. Cada pasta tem `spec.md` (contrato) e `tas
 | 008 | Templates de Programa e Geração de Plano por IA | 🔵 Em Andamento (código ✅) | 🟡 Média | 005, 007 |
 | 009 | Acompanhamento Adaptativo, Milestones e Loop de Objetivo | 🔵 Em Andamento (código ✅) | 🟡 Média | 004, 008 |
 | 010 | Monetização Freemium e Controle de Acesso | 🔵 Em Andamento (código ✅) | 🟢 Baixa | 002, 008, 009 |
+| 011 | Resiliência e Edição da Sessão de Treino | 🔵 Em Andamento (código ✅) | 🔴 Crítica | 004, 006 |
+| 012 | Confiabilidade do Comando de Voz para Parar o Cronômetro | 🔵 Em Andamento (código ✅) | 🟠 Alta | 004 |
+| 013 | Reclassificação de Exercícios (Estáticos × Dinâmicos) | 🔵 Em Andamento (código ✅) | 🟡 Média | 003, 004, 005 |
+
+> **Lote de feedback de teste de uso (Gustavo, 2026-06-23).** 011–013 nascem de pontos levantados em
+> teste real do player de treino. 011 é **crítica** (perda de dados da sessão ativa). As melhorias de
+> jornada/onboarding/freemium planejadas à parte entram como 014+ quando forem para execução.
 
 ## Ordem de execução recomendada
 

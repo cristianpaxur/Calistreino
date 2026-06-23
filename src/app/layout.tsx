@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import BottomNav from "@/components/Nav";
+import ResumeWorkoutBar from "@/components/ResumeWorkoutBar";
 
 export const metadata: Metadata = {
   title: "CalisTreino — Front Lever + Planche",
@@ -32,6 +33,13 @@ export default function RootLayout({
       <body className="font-sans">
         <div className="relative mx-auto flex h-[100dvh] w-full max-w-[440px] flex-col overflow-hidden bg-bg text-ink md:my-3 md:h-[min(940px,96dvh)] md:rounded-[44px] md:border md:border-white/10 md:shadow-2xl">
           <div className="flex-1 overflow-y-auto overflow-x-hidden">{children}</div>
+          {/* Barra de retomada "treino em andamento" — montada globalmente para
+              flutuar acima da BottomNav em qualquer rota. É client component
+              auto-descoberto (lê o draft do localStorage e decide sozinho se
+              aparece), então o layout server só precisa incluir o elemento;
+              nenhum "use client" é necessário aqui. Renderiza no mesmo nível da
+              nav, logo acima dela, para coexistir com o posicionamento fixed. */}
+          <ResumeWorkoutBar />
           <BottomNav />
         </div>
       </body>
